@@ -167,16 +167,15 @@ let runJumps = 0; // salti effettuati nel tentativo (salti+orb via jumpCount, +p
 let prevJumpCount = 0; // ultimo player.jumpCount visto (per il delta)
 let prevAlive = true; // stato vivo precedente (per rilevare la morte una volta)
 
-// Sblocca l'audio al primo gesto utente (policy browser).
+// Sblocca l'audio al primo gesto utente (policy browser: solo gesti "attivanti"
+// — click/tap/tasto/penna — sbloccano l'AudioContext; il solo mousemove NON
+// basta). pointerdown copre mouse+touch+penna in un evento unico e precoce.
+const UNLOCK_EVENTS = ['pointerdown', 'mousedown', 'touchstart', 'keydown'];
 function unlockAudioOnce() {
   audio.unlock();
-  window.removeEventListener('keydown', unlockAudioOnce);
-  window.removeEventListener('mousedown', unlockAudioOnce);
-  window.removeEventListener('touchstart', unlockAudioOnce);
+  for (const ev of UNLOCK_EVENTS) window.removeEventListener(ev, unlockAudioOnce);
 }
-window.addEventListener('keydown', unlockAudioOnce);
-window.addEventListener('mousedown', unlockAudioOnce);
-window.addEventListener('touchstart', unlockAudioOnce);
+for (const ev of UNLOCK_EVENTS) window.addEventListener(ev, unlockAudioOnce);
 
 // --- Avvio livello selezionato ---------------------------------------------
 function startLevel() {
