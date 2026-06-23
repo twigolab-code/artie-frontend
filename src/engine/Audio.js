@@ -151,9 +151,12 @@ export class Audio {
   update() {
     if (!this.enabled) return;
     const now = this.ctx.currentTime;
-    // Schedula con ~100ms di anticipo per non avere buchi ritmici.
+    // Finché l'AudioContext non è davvero attivo (policy autoplay: serve un gesto
+    // utente), NON generare suoni — emetterebbero warning in console. Avanza solo
+    // il clock dei beat così al risveglio non c'è un buco ritmico.
+    const running = this.ctx.state === 'running';
     while (this._nextBeatTime < now + 0.1) {
-      this._scheduleBeat(this._nextBeatTime, this._beatIndex);
+      if (running) this._scheduleBeat(this._nextBeatTime, this._beatIndex);
       this._nextBeatTime += this.secondsPerBeat;
       this._beatIndex++;
     }
