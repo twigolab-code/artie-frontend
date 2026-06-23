@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>GeoRush</title>
+    <!-- PWA: installabile + a tutto schermo se lanciata dall'icona Home -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <!-- iOS Safari: web-app a tutto schermo (zero barre) quando aperta da Home.
+         Safari NON ha la Fullscreen API in-scheda: l'unico vero fullscreen su
+         iPhone e' "Aggiungi a Home" (vedi banner #installHint). -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="OG DASH" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="icon" href="./apple-touch-icon.png" />
     <!-- Font display della UI (locale) -->
     <style>
       @font-face {
@@ -108,6 +119,90 @@
           transform: rotate(-90deg);
         }
       }
+
+      /* Banner "Aggiungi a Home": invito (solo iPhone in Safari, non standalone)
+         a installare per il vero fullscreen. Mostrato/nascosto via JS. z-index 9
+         (sotto #rotate=10: in portrait comanda l'overlay rotazione). */
+      #installHint {
+        display: none; /* attivato in JS -> 'flex' su iOS Safari non-standalone */
+        position: fixed;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        z-index: 9;
+        max-width: min(92vw, 560px);
+        box-sizing: border-box;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 2px solid #ffd23f;
+        background: rgba(20, 16, 46, 0.96);
+        color: #ffffff;
+        font-family: 'SoccerLeague', system-ui, sans-serif;
+        box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+      }
+      #installHint .ih-text {
+        flex: 1;
+        font-size: clamp(13px, 3.6vw, 17px);
+        line-height: 1.25;
+      }
+      #installHint .ih-text b {
+        color: #ffd23f;
+      }
+      /* Glifo "Condividi" iOS (quadrato aperto in alto + freccia su) in CSS, no asset. */
+      #installHint .ih-share {
+        flex: 0 0 auto;
+        position: relative;
+        width: 26px;
+        height: 30px;
+      }
+      #installHint .ih-share::before {
+        content: '';
+        position: absolute;
+        left: 2px;
+        bottom: 0;
+        width: 22px;
+        height: 18px;
+        border: 2px solid #ffd23f;
+        border-top: none;
+        border-radius: 3px;
+        box-sizing: border-box;
+      }
+      /* Asta verticale della freccia (sale dentro il box). */
+      #installHint .ih-share::after {
+        content: '';
+        position: absolute;
+        left: 12px;
+        top: 4px;
+        width: 2px;
+        height: 15px;
+        background: #ffd23f;
+      }
+      /* Punta della freccia (chevron) in cima all'asta. */
+      #installHint .ih-share i {
+        position: absolute;
+        left: 9px;
+        top: 3px;
+        width: 8px;
+        height: 8px;
+        border-left: 2px solid #ffd23f;
+        border-top: 2px solid #ffd23f;
+        transform: rotate(45deg);
+      }
+      #installHint .ih-close {
+        flex: 0 0 auto;
+        width: 30px;
+        height: 30px;
+        border: none;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.12);
+        color: #ffffff;
+        font-family: inherit;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -117,6 +212,12 @@
       <div class="rotate-phone"></div>
       <div class="rotate-title">RUOTA IL TELEFONO</div>
       <div class="rotate-sub">Gioca in orizzontale</div>
+    </div>
+    <!-- Banner "Aggiungi a Home" (mostrato via JS solo su iPhone in Safari). -->
+    <div id="installHint" role="dialog" aria-label="Aggiungi a Home">
+      <span class="ih-share" aria-hidden="true"><i></i></span>
+      <span class="ih-text">Per il <b>fullscreen</b>: tocca <b>Condividi</b> e poi <b>"Aggiungi a Home"</b></span>
+      <button id="installHintClose" class="ih-close" type="button" aria-label="Chiudi">✕</button>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

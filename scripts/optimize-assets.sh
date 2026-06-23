@@ -64,6 +64,19 @@ echo "==> Audio -> AAC (.m4a)"
 afconvert -f m4af -d aac -b 96000 "$PUB/home.mp3" "$PUB/home.m4a" >/dev/null
 # game.mp3 (27s, 128kbps, 430KB) e' gia' compatto: lasciato com'e'.
 
+echo "==> Icone PWA (Aggiungi a Home)"
+# Icone dell'app generate dal cubo Artie (gia' quadrato 256x256 su sfondo nero):
+# - apple-touch-icon (iOS, ignora il manifest per l'icona) 180
+# - icon-192 / icon-512 (manifest Android / install)
+# - icon-maskable-512 (cubo all'80% centrato + padding nero = "safe zone")
+ICON_SRC="$TMP/cube-icon.png"
+dwebp -quiet "$PUB/artie-cube.webp" -o "$ICON_SRC"
+sips -s format png -z 180 180 "$ICON_SRC" --out "$PUB/apple-touch-icon.png" >/dev/null
+sips -s format png -z 192 192 "$ICON_SRC" --out "$PUB/icon-192.png" >/dev/null
+sips -s format png -z 512 512 "$ICON_SRC" --out "$PUB/icon-512.png" >/dev/null
+sips -s format png -z 410 410 "$ICON_SRC" --out "$TMP/cube-410.png" >/dev/null
+sips -p 512 512 --padColor 000000 "$TMP/cube-410.png" --out "$PUB/icon-maskable-512.png" >/dev/null
+
 echo "==> Fatto. Confronto dimensioni:"
 for base in artie-cube miles-cubo dodge-artie coin palm logo options stats bg-home LA metro wash boulevard; do
   if [ -f "$PUB/$base.png" ] && [ -f "$PUB/$base.webp" ]; then

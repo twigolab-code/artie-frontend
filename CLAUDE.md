@@ -22,9 +22,18 @@ doc: read it first so you don't have to re-explore the codebase. Code comments a
   coin, palm) live in `public/` and are referenced by absolute path. Images are **WebP**
   (e.g. `/artie-cube.webp`), the menu track is **AAC** (`/home.m4a`), the in-level track stays
   `/game.mp3`, the UI font is `/SoccerLeague.ttf`. `scripts/optimize-assets.sh` regenerates the
-  optimized assets (uses `cwebp` + macOS `afconvert`); run it if you add/replace an asset.
+  optimized assets (uses `cwebp` + macOS `afconvert`; also produces the **PWA icons** —
+  `apple-touch-icon.png` 180, `icon-192/512.png`, `icon-maskable-512.png` — from `artie-cube.webp`
+  via `dwebp`+`sips`); run it if you add/replace an asset.
   `vite.config.js` uses `base: './'` (relative paths). The vector fallback in `Assets.js` covers a
   missing/unsupported image.
+- **PWA / "Add to Home" (mobile fullscreen):** iOS Safari has **no in-tab Fullscreen API**, so the
+  only true no-address-bar fullscreen on iPhone is installing the site from the Home screen. The app
+  is installable: `public/manifest.webmanifest` (`display: fullscreen`, `orientation: landscape`,
+  icons, `theme_color #1a1a2e`) + Apple meta tags in `index.html` head
+  (`apple-mobile-web-app-capable=yes`, `…-status-bar-style=black-translucent`, `apple-touch-icon`).
+  All same-origin → the existing CSP already allows it (no `manifest-src`/`img-src` change). See the
+  install-hint banner in §4. (Icons regenerate via `scripts/optimize-assets.sh`.)
 - No test harness. Verify level changes by a static grid walk + playing via `npm run dev`.
 - **Deploy:** hosted on **Cloudflare Pages** via the **Git integration** (dashboard-driven, not
   GitHub Actions): Pages clones the repo on push to `main` and runs the build itself. Settings →
@@ -125,11 +134,23 @@ src/
   the overlay) while `render()` keeps drawing. Entering portrait mid-`playing` sets `isPaused=true`
   so rotating back lands on the pause overlay, not a death. `drawPreHome()` early-returns (and hides
   the input) while blocked. The viewport meta uses `viewport-fit=cover`.
+- **Install-hint banner (`#installHint`):** DOM banner in `index.html` (styled inline, UI palette +
+  a CSS-drawn iOS Share glyph — no asset, CSP-safe) inviting "Aggiungi a Home" for true fullscreen.
+  Shown **only** on iOS Safari **not** already standalone (`isIos()` + `!isStandalone()` via
+  `navigator.standalone` / `display-mode: standalone|fullscreen`), and not previously dismissed
+  (`gd_installHintDismissed` in localStorage). `updateInstallHint()` (called from `render()` and
+  `onOrientationChange()`) toggles it `flex`/`none`: visible only in `prehome`/`home` and landscape
+  (hidden in portrait — `#rotate` wins, lower z-index). The ✕ button persists the dismissal. In
+  standalone (goal reached) it never appears.
+- **Mobile fullscreen sizing:** `Renderer._resize()` also listens on `orientationchange` and
+  `visualViewport` (`resize`/`scroll`) so the letterbox recomputes cleanly when Safari's address bar
+  shows/hides (avoids bands/jitter). In standalone there's no bar, so it's a no-op there.
 - **Back navigation:** a shared "indietro" arrow (`backArrowRect()` + `arrow(rect,-1)`, top-left) is
   drawn and hit-tested on `players`/`levels`/`options`/`stats` → returns to `home`. On `levels`/`players`
   the arrow is checked first (priority over "click = play"/select).
 - **Persistence (localStorage):** `gd_audio` (music/sfx/muted), `gd_bestCoins` (per-level coin
-  record), `gd_levelStats` (per-level bestPct/attempts/jumps), `gd_nickname` (player nickname).
+  record), `gd_levelStats` (per-level bestPct/attempts/jumps), `gd_nickname` (player nickname),
+  `gd_installHintDismissed` (`'1'` once the Add-to-Home banner is closed).
 - **Backgrounds registry:** procedural `BACKGROUNDS = { neon, city, la }` + image backgrounds built
   lazily in `getBg(key)` from `IMG_BG = { losangeles:'LA', metro:'metro', carwash:'wash',
   boulevard:'boulevard' }` (each an `ImageBackground` tiling its WebP in a slow horizontal loop,

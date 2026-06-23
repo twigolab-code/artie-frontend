@@ -25,6 +25,14 @@ export class Renderer {
 
     this._resize = this._resize.bind(this);
     window.addEventListener('resize', this._resize);
+    window.addEventListener('orientationchange', this._resize);
+    // iOS Safari: lo show/hide della barra cambia innerHeight ma non sempre emette
+    // 'resize' pulito; visualViewport notifica il cambio reale dell'area visibile,
+    // così il letterbox si ricalcola senza bande/jitter. (In standalone è inattivo.)
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', this._resize);
+      window.visualViewport.addEventListener('scroll', this._resize);
+    }
     this._resize();
   }
 

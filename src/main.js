@@ -797,6 +797,9 @@ function render(alpha) {
     nickInput.style.display = 'none';
   }
 
+  // Banner "Aggiungi a Home": visibile solo nei menu d'ingresso, in landscape.
+  updateInstallHint();
+
   if (gameState === 'prehome') return drawPreHome();
   if (gameState === 'loader') return drawLoader();
   if (gameState === 'home') return drawHome();
@@ -2146,6 +2149,56 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+// --- Banner "Aggiungi a Home" (fullscreen su iPhone) ------------------------
+// Safari iPhone non ha la Fullscreen API in-scheda: l'unico vero fullscreen e'
+// installare il sito da Home. Mostriamo un invito SOLO su iOS in Safari (non gia'
+// in standalone) e non gia' chiuso dall'utente. In standalone il banner non serve.
+const installHintEl = document.getElementById('installHint');
+const installHintCloseEl = document.getElementById('installHintClose');
+
+function isIos() {
+  const ua = navigator.userAgent || '';
+  // iPhone/iPad/iPod + iPadOS (che si presenta come Mac ma con touch).
+  return /iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document);
+}
+function isStandalone() {
+  return (
+    window.navigator.standalone === true ||
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+    (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches)
+  );
+}
+function installHintDismissed() {
+  try {
+    return localStorage.getItem('gd_installHintDismissed') === '1';
+  } catch {
+    return false;
+  }
+}
+// Idoneita' statica calcolata una volta: iOS, in Safari (non standalone), non chiuso.
+let installHintEligible = !!installHintEl && isIos() && !isStandalone() && !installHintDismissed();
+
+// Mostra/nasconde il banner in base allo stato corrente (chiamata da render +
+// onOrientationChange). Idempotente: scrive display solo se cambia.
+function updateInstallHint() {
+  if (!installHintEl) return;
+  // Solo nei menu d'ingresso (prehome/home), in landscape, se idoneo.
+  const show = installHintEligible && !orientationBlocked && (gameState === 'prehome' || gameState === 'home');
+  const next = show ? 'flex' : 'none';
+  if (installHintEl.style.display !== next) installHintEl.style.display = next;
+}
+if (installHintCloseEl) {
+  installHintCloseEl.addEventListener('click', () => {
+    installHintEligible = false;
+    try {
+      localStorage.setItem('gd_installHintDismissed', '1');
+    } catch {
+      // niente persistenza: si richiudera' comunque per questa sessione.
+    }
+    updateInstallHint();
+  });
+}
+
 // --- Wiring orientamento: overlay "ruota il telefono" + freeze ---------------
 const rotateEl = document.getElementById('rotate');
 function onOrientationChange() {
@@ -2158,6 +2211,7 @@ function onOrientationChange() {
   orientationBlocked = blocked;
   if (rotateEl) rotateEl.style.display = blocked ? 'flex' : 'none';
   if (gameState === 'prehome') positionNickInput(); // riallinea l'input al ritorno landscape
+  updateInstallHint(); // nascondi/mostra il banner col cambio orientamento
   input.consumePress(); // scarta eventuali edge accumulati durante il blocco
 }
 mqPortrait.addEventListener('change', onOrientationChange);

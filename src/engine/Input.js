@@ -10,6 +10,15 @@
 // Le sorgenti di "salto" sono: barra spaziatrice / freccia su, click sinistro,
 // touch. Tutte mappano sulla stessa azione.
 // =============================================================================
+// True se l'elemento è un campo editabile (input/textarea/select o contentEditable):
+// sui tap su questi elementi non vanno né preventDefault né salto, così la tastiera
+// mobile si apre e la digitazione funziona.
+function isEditableTarget(el) {
+  if (!el || !el.tagName) return false;
+  const tag = el.tagName.toUpperCase();
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
 export class Input {
   constructor(target = window) {
     this.held = false; // azione di salto attualmente premuta
@@ -38,6 +47,10 @@ export class Input {
     target.addEventListener(
       'touchstart',
       (e) => {
+        // Tap su un campo editabile (es. <input> nickname): NON fare preventDefault,
+        // altrimenti su mobile si annulla il focus e non si apre la tastiera. Né va
+        // contato come salto.
+        if (isEditableTarget(e.target)) return;
         e.preventDefault();
         this._press();
       },
