@@ -1,0 +1,52 @@
+name: Deploy
+
+# Build + deploy di GeoRush su Cloudflare Pages.
+# - push su main  -> deploy in produzione
+# - pull request  -> build di verifica + preview deploy (URL temporaneo)
+#
+# Secrets richiesti (repo Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN   token con permesso "Cloudflare Pages: Edit"
+#   CLOUDFLARE_ACCOUNT_ID  id account Cloudflare
+# E un progetto Pages gia' creato con nome "georush" (vedi PROJECT_NAME sotto).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Annulla build vecchie sullo stesso ref se ne parte una nuova.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    env:
+      PROJECT_NAME: georush
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Gli asset ottimizzati (.webp/.m4a) sono gia' committati in public/,
+      # quindi la CI non ha bisogno di cwebp/afconvert: builda e basta.
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=${{ env.PROJECT_NAME }}

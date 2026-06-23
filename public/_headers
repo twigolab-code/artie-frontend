@@ -1,0 +1,25 @@
+# Cloudflare Pages — header HTTP per cache ed edge.
+# Sintassi: https://developers.cloudflare.com/pages/configuration/headers/
+
+# Bundle JS/CSS con hash nel nome (cache-busting via filename) -> cache eterna.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Asset statici di public/ (nomi fissi, niente hash): cache lunga ma con
+# revalidazione cosi' una sostituzione viene ripresa entro un giorno.
+/*.webp
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+/*.m4a
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+/*.mp3
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+/*.ttf
+  Cache-Control: public, max-age=2592000, immutable
+
+# HTML: mai cache "dura" cosi' gli aggiornamenti del gioco si propagano subito.
+# Header di sicurezza di base applicati a tutto il sito.
+/*
+  Cache-Control: no-cache
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin

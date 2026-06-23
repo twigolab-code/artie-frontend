@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>GeoRush</title>
+    <!-- Font display della UI (locale) -->
+    <style>
+      @font-face {
+        font-family: 'SoccerLeague';
+        src: url('/SoccerLeague.ttf') format('truetype');
+        font-display: swap;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #1a1a2e;
+      }
+      /* Il canvas riempie tutta la finestra; touch-action: none evita lo scroll su mobile */
+      #game {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        touch-action: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
