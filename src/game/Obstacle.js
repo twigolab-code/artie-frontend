@@ -5,7 +5,6 @@ import {
   TILE_SPIKE_SMALL,
   TILE_SPIKE_DOWN,
   TILE_SPIKE_FLOOR,
-  BLOCK_GRID_COLOR,
   OBSTACLE_FILL_TOP,
   OBSTACLE_FILL_BOTTOM,
   EDGE_COLOR,
@@ -92,15 +91,6 @@ export class Obstacle {
     grad.addColorStop(1, OBSTACLE_FILL_BOTTOM);
     ctx.fillStyle = grad;
     ctx.fillRect(sx, sy, w, h);
-
-    ctx.strokeStyle = BLOCK_GRID_COLOR;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(sx + w / 2, sy);
-    ctx.lineTo(sx + w / 2, sy + h);
-    ctx.moveTo(sx, sy + h / 2);
-    ctx.lineTo(sx + w, sy + h / 2);
-    ctx.stroke();
 
     ctx.save();
     ctx.shadowColor = GLOW_COLOR;

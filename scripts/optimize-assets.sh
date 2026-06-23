@@ -51,8 +51,13 @@ resize_webp "$PUB/options.png" "$PUB/options.webp" 160 86
 resize_webp "$PUB/stats.png" "$PUB/stats.webp" 160 86
 # Sfondo home (full HD, qualita' un filo piu' bassa)
 resize_webp "$PUB/bg-home.png" "$PUB/bg-home.webp" 1920 80
-# Sfondo LA (loop orizzontale): 3168 -> 1920 di larghezza
-resize_webp "$PUB/bg-los-angeles.png" "$PUB/bg-los-angeles.webp" 1920 80
+# Sfondi livello (loop orizzontale, scalati all'altezza del cielo dal tiling):
+# max_dimension = lato lungo (la larghezza); scelto cosi' che l'altezza finale
+# resti ~720-960px anche per le panoramiche, senza schiacciare.
+resize_webp "$PUB/LA.png" "$PUB/LA.webp" 2660 80         # 3723x1344 -> alt ~960
+resize_webp "$PUB/metro2.png" "$PUB/metro.webp" 6400 80  # 9504x1069 -> alt ~720
+resize_webp "$PUB/wash.png" "$PUB/wash.webp" 5180 80     # 6336x1174 -> alt ~960
+resize_webp "$PUB/boulevard.png" "$PUB/boulevard.webp" 2275 80 # 3168x1338 -> alt ~960
 
 echo "==> Audio -> AAC (.m4a)"
 # Traccia menu (173s, 320kbps, 6.7MB) -> 96kbps AAC (~2MB)
@@ -60,7 +65,7 @@ afconvert -f m4af -d aac -b 96000 "$PUB/home.mp3" "$PUB/home.m4a" >/dev/null
 # game.mp3 (27s, 128kbps, 430KB) e' gia' compatto: lasciato com'e'.
 
 echo "==> Fatto. Confronto dimensioni:"
-for base in artie-cube miles-cubo dodge-artie coin palm logo options stats bg-home bg-los-angeles; do
+for base in artie-cube miles-cubo dodge-artie coin palm logo options stats bg-home LA metro wash boulevard; do
   if [ -f "$PUB/$base.png" ] && [ -f "$PUB/$base.webp" ]; then
     o=$(stat -f%z "$PUB/$base.png"); n=$(stat -f%z "$PUB/$base.webp")
     printf "  %-18s %8s -> %8s\n" "$base" "$o" "$n"

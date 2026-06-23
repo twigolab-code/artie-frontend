@@ -5,8 +5,9 @@ import {
   MAX_FALL_SPEED,
   FLOOR_Y,
   ROTATION_SPEED,
-  COLORS,
   PLAYER_INNER,
+  PLAYER_FILL_TOP,
+  PLAYER_FILL_BOTTOM,
   PLAYER_EDGE,
   GLOW_COLOR,
   GLOW_BLUR,
@@ -263,13 +264,13 @@ export class Player {
       ctx.drawImage(this.cubeSkin.img, -half, -half, this.size, this.size);
       if (USE_SKIN_GLOW) this._skinEdge(ctx, -half, -half, this.size, this.size);
     } else {
-      // Fallback vettoriale: cubo verde + interno scuro + bordo glow.
-      ctx.fillStyle = COLORS.player;
+      // Fallback vettoriale: cubo a gradiente verticale (stile triangoli, niente
+      // griglia interna) + bordo glow.
+      const grad = ctx.createLinearGradient(0, -half, 0, half);
+      grad.addColorStop(0, PLAYER_FILL_TOP);
+      grad.addColorStop(1, PLAYER_FILL_BOTTOM);
+      ctx.fillStyle = grad;
       ctx.fillRect(-half, -half, this.size, this.size);
-
-      const inner = this.size * 0.4;
-      ctx.fillStyle = PLAYER_INNER;
-      ctx.fillRect(-inner / 2, -inner / 2, inner, inner);
 
       ctx.shadowColor = GLOW_COLOR;
       ctx.shadowBlur = GLOW_BLUR;

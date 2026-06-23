@@ -30,9 +30,10 @@ export class Audio {
     // Brani di sottofondo da file (nome → HTMLAudioElement). _musicFileOk diventa
     // true se almeno un file carica: in tal caso NON si suona il beat sintetizzato.
     // _currentTrack è il brano desiderato (memorizzato anche prima dell'unlock):
-    // 'home' di default così i menu suonano appena l'audio si sblocca.
+    // null di default → nessun brano parte all'unlock (la schermata pre-home resta
+    // muta). Sarà la home a chiamare setTrack('home') per far partire la musica.
     this._tracks = {};
-    this._currentTrack = 'home';
+    this._currentTrack = null;
     this._musicFileOk = false;
 
     // Valori correnti (persistono anche prima dell'unlock).

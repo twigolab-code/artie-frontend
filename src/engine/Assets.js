@@ -49,12 +49,13 @@ export const PALM_IMG = getSkin('/palm.webp');
 // Icone Home: bottoni Opzioni e Stats.
 export const OPTIONS_IMG = getSkin('/options.webp');
 export const STATS_IMG = getSkin('/stats.webp');
-// Sfondo a immagine di Los Angeles (livello skyline2): caricato pigramente alla
-// prima richiesta via getLaBgImg() (non in home), perche' e' l'asset piu' pesante.
-let _laBgImg = null;
-export function getLaBgImg() {
-  if (!_laBgImg) _laBgImg = getSkin('/bg-los-angeles.webp');
-  return _laBgImg;
+// Sfondi a immagine dei livelli 2-5 (LA/metro/wash/boulevard): caricati pigramente
+// alla prima richiesta via getLevelBg(name) — NON in home, perche' sono gli asset
+// piu' pesanti. Cache per nome cosi' ogni sfondo si scarica una sola volta.
+const _bgCache = {};
+export function getLevelBg(name) {
+  if (!_bgCache[name]) _bgCache[name] = getSkin(`/${name}.webp`);
+  return _bgCache[name];
 }
 
 // Stato del font UI: il canvas usa Lilita One solo quando è caricato (altrimenti

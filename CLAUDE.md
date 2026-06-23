@@ -48,7 +48,7 @@ src/
     GameLoop.js        Fixed-timestep 60Hz loop (accumulator + interpolation alpha)
     Input.js           Keyboard/mouse/touch → jump; held (continuous) + consumePress() (edge, used by orbs)
     Audio.js           Music: two looped tracks from `MUSIC_TRACKS` (public/ `home.m4a`/`game.mp3`, routed via `music` gain); `setTrack('home'|'game', {restart})` switches them (menus=home, playing=game; game restarts each attempt). Falls back to a synth beat (BPM 128) if files are missing. Beat clock always runs for `beatPhase()` (visual pulse). SFX (coin/death only) are synth. Persistent volume/mute
-    Assets.js          Async image cache w/ vector fallback; getSkin(), LOGO_IMG/BG2_IMG/COIN_IMG/PALM_IMG/OPTIONS_IMG/STATS_IMG (all WebP), `getLaBgImg()` (lazy loader for the heavy `bg-los-angeles.webp`, not loaded on home), fontState (local `SoccerLeague` font via @font-face in index.html)
+    Assets.js          Async image cache w/ vector fallback; getSkin(), LOGO_IMG/BG2_IMG/COIN_IMG/PALM_IMG/OPTIONS_IMG/STATS_IMG (all WebP), `getLevelBg(name)` (cached lazy loader for the heavy level bg WebPs `LA`/`metro`/`wash`/`boulevard`, not loaded on home), fontState (local `SoccerLeague` font via @font-face in index.html)
   game/
     Player.js          Cube & Ship entity: gravity, jump, mode switch, collision resolution, rotation, render
     Level.js           Parses the tile grid → entity arrays (obstacles/portals/orbs/pads/coins); culled render()
@@ -63,37 +63,65 @@ src/
     Particles.js       Death burst (26 shards w/ gravity)
     Trail.js           Player trail (cube red squares / ship luminous streak)
     StarTrail.js       Ship thruster stars (deterministic jitter, no Math.random)
+    RocketField.js     Rocket-mode background ambiance: drifting stars + warp speed lines (deterministic, no Math.random; intensity scaled by themeT, draws nothing in cube mode). Rendered behind gameplay in main.js
     PortalFx.js        Portal transit VFX: white flash + expanding wave + sparks
     Background.js      Generic neon parallax grid (3 layers, beat pulse, theme lerp)
     CityBackground.js  Red skyline (procedural buildings, 3 tiers, clouds)
     LaBackground.js    Sunset beach (sun, palms, houses, ferris wheel, pier, lamp)
-    ImageBackground.js Image-tiled background (sky-only, horizontal loop, slow parallax); used by skyline2 with `BG_LA_IMG`
+    ImageBackground.js Image-tiled background (sky-only, horizontal loop, slow parallax; scales any image to sky height so differently-sized sources sync visually). One instance per image bg, built lazily in `getBg()` via `getLevelBg()`
   data/
     _grid.js           Helpers: ROWS=12, gap(w), assemble(...segments)
-    level1.js          Tutorial — NOT registered in LEVELS (orphan reference)
-    level2.js          Città (mapKey 'level2')
-    la.js              Los Angeles (mapKey 'la')
-    metro.js           Metro (mapKey 'metro')
-    skyline.js         Skyline (mapKey 'skyline')
+    skyline.js         City (mapKey 'skyline')
+    skyline2.js        Los Angeles (mapKey 'skyline2') — copy of skyline
+    metro2.js          Metro (mapKey 'metro2') — copy of skyline (to be modified)
+    carwash.js         Car Wash (mapKey 'carwash') — copy of skyline (to be modified)
+    boulevard.js       Boulevard (mapKey 'boulevard') — copy of skyline (to be modified)
 ```
 
 ## 4. Core loop & state machine
 - Fixed timestep: `FIXED_DT = 1/60`, `MAX_FRAME_TIME = 0.25` (caps recovery after a freeze).
-- Game states (in `main.js`): `home` · `players` · `levels` · `playing` · `complete` · `options` · `stats`.
+- Game states (in `main.js`): `prehome` · `home` · `players` · `levels` · `playing` · `complete` · `options` · `stats`.
+- **Pre-home (onboarding):** initial state. Shows the logo + a card with a **required** nickname
+  field and a `GIOCA` button. **No music plays here** (`Audio._currentTrack` starts `null`, so the
+  unlock-on-first-gesture loads files but plays nothing). The nickname uses a real `<input>` overlaid
+  on the canvas (`positionNickInput()` mirrors `toLogical`'s letterbox math; shown only on `prehome`,
+  hidden elsewhere in `render`). `GIOCA` is greyed/disabled until the nickname is non-empty; clicking
+  it (or Enter) runs `goHome()` → hides the input, calls `audio.setTrack('home')` (music starts here),
+  and switches to `home`. Persisted in `localStorage` `gd_nickname` (`getNickname`/`saveNickname`).
 - The world scrolls left; the player is pinned on screen at `PLAYER_X = 220`, so
   `playerWorldX = camera.x + PLAYER_X`. Level ends when the player reaches the finish X.
 - Per-frame handlers in `update(dt)`: `handleOrbs` (touch + `consumePress` → jump),
   `handlePortals` (mode switch + theme lerp + PortalFx), `handlePads` (auto-jump), `handleCoins`
   (collect). On death: play SFX once, spawn particles, ~0.7s timer, then restart.
+- **Pause:** `let isPaused` flag (reset in `restart()`). During `playing`, `Esc`/`P` or the round
+  pause button (top-right, drawn by `drawPauseButton`) toggle it; `update(dt)` early-returns while
+  paused so the world freezes but `render()` keeps drawing. Paused overlay (`drawPauseOverlay`) has
+  RIPRENDI / RICOMINCIA / ESCI (`pauseOverlayRects`). On any pause click/resume, `input.consumePress()`
+  discards the edge so it isn't read as a jump.
+- **Back navigation:** a shared "indietro" arrow (`backArrowRect()` + `arrow(rect,-1)`, top-left) is
+  drawn and hit-tested on `players`/`levels`/`options`/`stats` → returns to `home`. On `levels`/`players`
+  the arrow is checked first (priority over "click = play"/select).
 - **Persistence (localStorage):** `gd_audio` (music/sfx/muted), `gd_bestCoins` (per-level coin
-  record), `gd_levelStats` (per-level bestPct/attempts/jumps).
-- **Backgrounds registry:** `BACKGROUNDS = { neon, city, la, losangeles }` (`losangeles` = an
-  `ImageBackground` tiling `BG_LA_IMG` in a slow horizontal loop, sky-only); **floor** dispatch in
-  `drawFloor` → `la` / `city` / else neon. So `bg` accepts `'neon' | 'city' | 'la' | 'losangeles'`
-  and `floor` accepts `'neon' | 'city' | 'la'`.
-- **Music follows state:** menus (`home`/`players`/`levels`/`options`/`stats`) play the `home`
-  track; entering a level (`restart()`) plays `game` (restarted each attempt); leaving `complete`
-  back to `levels` returns to `home` (see `audio.setTrack` calls in `main.js`).
+  record), `gd_levelStats` (per-level bestPct/attempts/jumps), `gd_nickname` (player nickname).
+- **Backgrounds registry:** procedural `BACKGROUNDS = { neon, city, la }` + image backgrounds built
+  lazily in `getBg(key)` from `IMG_BG = { losangeles:'LA', metro:'metro', carwash:'wash',
+  boulevard:'boulevard' }` (each an `ImageBackground` tiling its WebP in a slow horizontal loop,
+  sky-only). So `bg` accepts `'neon' | 'city' | 'la' | 'losangeles' | 'metro' | 'carwash' |
+  'boulevard'`. **floor** dispatch in `drawFloor` → `la`/`city`/`metro`/`carwash`/`boulevard`/else
+  neon. `floor` accepts `'neon' | 'city' | 'la' | 'metro' | 'carwash' | 'boulevard'`. Styles:
+  city & carwash=brick texture (shared `drawBrickFloor`; city=red bricks + light edge, carwash=dark
+  asphalt bricks + red-neon glow edge via `neonTop`) · la & boulevard=plank walkway (shared
+  `drawPlankFloor`, purple vs blue) · metro=light-purple platform with wide tiles.
+- **Rocket-mode ambiance (driven by `themeT`, 0=cube→1=ship):** when the ship is active the floor
+  colors lerp toward `ROCKET_FLOOR_COLOR`/`ROCKET_FLOOR_LINE` (via `rocketFloor()` in `drawFloorCity`),
+  a `RocketField` (stars + warp speed lines) draws behind the gameplay, and `drawRocketAmbiance()`
+  lays a faint `ROCKET_TINT` tint + radial vignette over it. All fade in/out smoothly with `themeT`
+  and cost nothing in cube mode.
+- **Music follows state:** `prehome` is **silent** (`Audio._currentTrack` starts `null`); the first
+  music starts when `goHome()` calls `audio.setTrack('home')`. Thereafter menus
+  (`home`/`players`/`levels`/`options`/`stats`) play the `home` track; entering a level (`restart()`)
+  plays `game` (restarted each attempt); leaving `complete` back to `levels` returns to `home` (see
+  `audio.setTrack` calls in `main.js`).
 
 ## 5. Physics constants (from `config.js` — quote, don't guess)
 Velocities are scaled ×1.30 and gravity ×1.69 vs. an earlier "slow" baseline (the +30% speed feel).
@@ -180,8 +208,8 @@ From the simulator-verified headers in `level2.js` / `skyline.js`:
    ```js
    {
      id: '<name>', name: '<Display>', diff: 'Medio',   // Facile | Medio | Difficile
-     bg: 'city', floor: 'city',                        // 'neon' | 'city' | 'la'
-     cube: CITY_CUBE, ship: CITY_SHIP,                 // a {top,bottom} theme pair from config
+     bg: 'losangeles', floor: 'city',                  // 'neon' | 'city' | 'la' | 'losangeles'
+     cube: LA_CUBE, ship: LA_SHIP,                     // a {top,bottom} theme pair from config
      scrollSpeed: 585, mapKey: '<name>', diffFrac: 0.55,
      // comingSoon: true,   // OMIT to make the level selectable/playable
    }
@@ -189,17 +217,20 @@ From the simulator-verified headers in `level2.js` / `skyline.js`:
    `mapKey` must match both the `data/` export and the `MAPS` key.
 
 ## 9. Current content
-| id | name | mapKey | speed | diff | notes |
-|----|------|--------|-------|------|-------|
-| city | Città | `level2` | 585 | Facile | playable |
-| la | Los Angeles | `la` | 480 | Medio | `comingSoon: true` (locked) |
-| metro | Metro | `metro` | 560 | Difficile | `comingSoon: true` (locked); `bg/floor: 'city'` placeholder |
-| skyline | Skyline | `skyline` | 585 | Medio | playable; longer, vertical, **max 3 contiguous hazards** (stricter than the global ≤4) |
-| skyline2 | Skyline 2 | `skyline2` | 585 | Medio | playable; same map as `skyline` but `bg: 'losangeles'` (image bg `bg-los-angeles.png` looped, sky-only); `floor: 'city'` |
+All 5 levels are playable, `diff: 'Medio'`, `scrollSpeed: 585`, `floor: 'city'`, themes `LA_CUBE/LA_SHIP`.
+Levels 3–5 are **placeholder copies of the `skyline` map** (to be differentiated later).
 
-- `level1.js` is an older tutorial map and is **not** wired into `LEVELS`/`MAPS`.
+| # | id | name | mapKey | bg | floor | notes |
+|---|----|------|--------|----|----|-------|
+| 1 | city | City | `skyline` | `city` | `city` | longer, vertical, **max 3 contiguous hazards** (stricter than the global ≤4) |
+| 2 | losangeles | Los Angeles | `skyline2` | `losangeles` (LA.webp) | `la` | copy of `skyline`; image bg looped, sky-only |
+| 3 | metro | Metro | `metro2` | `metro` (metro.webp) | `metro` | copy of `skyline` (to be modified) |
+| 4 | carwash | Car Wash | `carwash` | `carwash` (wash.webp) | `carwash` | copy of `skyline` (to be modified) |
+| 5 | boulevard | Boulevard | `boulevard` | `boulevard` (boulevard.webp) | `boulevard` | copy of `skyline` (to be modified) |
+
 - **Players (skins only, identical physics):** `Artie` (`/artie-cube.png`), `Miles` (`/miles-cubo.png`).
 - **Themes:** neon (`THEME_CUBE/SHIP`), city (`CITY_CUBE/SHIP`), LA (`LA_CUBE/SHIP`), metro (`METRO_CUBE/SHIP`).
+  `CITY_*`/`METRO_*` are currently unused by `LEVELS` (kept for reference).
 
 ## 10. Conventions & gotchas
 - Comments and on-screen text are Italian; keep that style when editing existing files.

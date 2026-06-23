@@ -46,8 +46,11 @@ export class ImageBackground {
     ctx.beginPath();
     ctx.rect(left, top, right - left, skyH);
     ctx.clip();
+    // Disegno ogni tile largo 1px in più, partendo da una X arrotondata a intero:
+    // i bordi adiacenti si sovrappongono e la sottile "linea verticale" della
+    // giunzione (sub-pixel) sparisce.
     while (x < right) {
-      ctx.drawImage(h.img, x, top, tileW, skyH);
+      ctx.drawImage(h.img, Math.round(x), top, Math.ceil(tileW) + 1, skyH);
       x += tileW;
     }
     ctx.restore();

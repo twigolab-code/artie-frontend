@@ -68,75 +68,97 @@ export const CITY_FLOOR_COLOR = '#cc2418';
 export const CITY_FLOOR_BRICK = '#a81d12';
 export const CITY_FLOOR_LINE = '#ffb3a0';
 
+// Pavimento Metro (banchina): viola chiaro uniforme + piastrelle larghe.
+export const METRO_FLOOR_COLOR = '#6a5a9a'; // fascia base (banchina)
+export const METRO_FLOOR_TILE = '#8a7ab8'; // linee delle piastrelle (fuga chiara)
+export const METRO_FLOOR_LINE = '#cdbff0'; // bordo superiore chiaro
+
+// Pavimento Car Wash (asfalto notturno): mattoni grigio scuro + bordo rosso neon.
+export const WASH_FLOOR_COLOR = '#23202a'; // asfalto scuro (base/fuga)
+export const WASH_FLOOR_BRICK = '#2e2a36'; // mattone grigio asfalto (poco piu' chiaro)
+export const WASH_FLOOR_EDGE = '#e0322a'; // bordo superiore rosso neon
+
+// Pavimento Boulevard (strada azzurra): assi blu (stessa logica passeggiata LA).
+export const BLVD_FLOOR_COLOR = '#3f6fa8'; // fascia base blu
+export const BLVD_FLOOR_PLANK = 'rgba(0,0,0,0.16)'; // assi/linee
+export const BLVD_FLOOR_LINE = '#bfe0ff'; // bordo superiore chiaro
+
+// --- Ambiente "razzo" (quando il cubo si trasforma in razzo) ----------------
+// Il pavimento e l'atmosfera virano verso una tinta energetica/spaziale,
+// pilotati da themeT (0 = cubo, 1 = razzo).
+export const ROCKET_FLOOR_COLOR = '#2a1a6a'; // pavimento → viola/indaco profondo
+export const ROCKET_FLOOR_LINE = '#9a7bff'; // linea superiore → viola luminoso
+export const ROCKET_TINT = '#6a3cff'; // velo/vignette + stelle
+export const ROCKET_STAR_COLOR = '#cdbfff'; // stelle di sfondo
+export const ROCKET_SPEED_LINE_COLOR = '#b8a6ff'; // linee di velocità (warp)
+
 // --- Livelli (dati-driven): sfondo, pavimento, temi, difficoltà, mappa --------
 // `bg`/`floor` = stile sfondo/pavimento; `cube`/`ship` = temi colore (vira ai
 // portali); `scrollSpeed` = difficoltà; `mapKey` = quale mappa in data/;
 // `diffFrac` = riempimento [0,1] della barra difficoltà nel menu.
-// Livelli in ordine di difficoltà: Città (facile) · Los Angeles (medio) · Metro
-// (difficile). LA e Metro usano `bg:'city'` come placeholder finché non avremo
-// gli sfondi dedicati (reference in arrivo) — cambia solo il colore del cielo.
+// 5 livelli giocabili: City (bg procedurale 'city') · Los Angeles + Metro +
+// Car Wash + Boulevard (bg immagine 'losangeles'). Metro/Car Wash/Boulevard sono
+// per ora duplicati della mappa skyline, da differenziare in seguito.
 export const LEVELS = [
   {
     id: 'city',
-    name: 'Città',
-    diff: 'Facile',
-    bg: 'city',
+    name: 'City',
+    diff: 'Medio',
+    bg: 'city', // skyline procedurale
     floor: 'city',
-    cube: CITY_CUBE,
-    ship: CITY_SHIP,
-    scrollSpeed: 585, // invariato
-    mapKey: 'level2', // mappa Città invariata
-    diffFrac: 0.25, // barra "facile" nel menu
+    cube: LA_CUBE, // riusa i temi colore esistenti
+    ship: LA_SHIP,
+    scrollSpeed: 585,
+    mapKey: 'skyline',
+    diffFrac: 0.55,
   },
   {
-    id: 'la',
+    id: 'losangeles',
     name: 'Los Angeles',
     diff: 'Medio',
-    bg: 'la', // tramonto sulla spiaggia (LaBackground)
-    floor: 'la', // passeggiata/lungomare
+    bg: 'losangeles', // sfondo immagine LA.webp (loop)
+    floor: 'la', // passeggiata viola
     cube: LA_CUBE,
     ship: LA_SHIP,
-    scrollSpeed: 480, // medio
-    mapKey: 'la',
+    scrollSpeed: 585,
+    mapKey: 'skyline2',
     diffFrac: 0.55,
-    comingSoon: true, // livello bloccato: visibile ma non avviabile
   },
   {
     id: 'metro',
     name: 'Metro',
-    diff: 'Difficile',
-    bg: 'city', // TODO: sfondo dedicato (reference in arrivo)
-    floor: 'city',
-    cube: METRO_CUBE,
-    ship: METRO_SHIP,
-    scrollSpeed: 560, // difficile
-    mapKey: 'metro',
-    diffFrac: 0.9,
-    comingSoon: true, // livello bloccato: visibile ma non avviabile
+    diff: 'Medio',
+    bg: 'metro', // sfondo immagine metro.webp (loop)
+    floor: 'metro', // banchina viola chiaro
+    cube: LA_CUBE,
+    ship: LA_SHIP,
+    scrollSpeed: 585,
+    mapKey: 'metro2', // duplicato di skyline (da modificare)
+    diffFrac: 0.55,
   },
   {
-    id: 'skyline',
-    name: 'Skyline',
+    id: 'carwash',
+    name: 'Car Wash',
     diff: 'Medio',
-    bg: 'city', // styling città (bg valido: city/la)
-    floor: 'city',
-    cube: LA_CUBE, // riusa i temi colore esistenti
+    bg: 'carwash', // sfondo immagine wash.webp (loop)
+    floor: 'carwash', // asfalto scuro + bordo rosso neon
+    cube: LA_CUBE,
     ship: LA_SHIP,
-    scrollSpeed: 585, // target di design del livello
-    mapKey: 'skyline',
-    diffFrac: 0.55, // barra "medio" nel menu
+    scrollSpeed: 585,
+    mapKey: 'carwash', // duplicato di skyline (da modificare)
+    diffFrac: 0.55,
   },
   {
-    id: 'skyline2',
-    name: 'Skyline 2',
+    id: 'boulevard',
+    name: 'Boulevard',
     diff: 'Medio',
-    bg: 'losangeles', // sfondo a immagine (bg-los-angeles.png) in loop
-    floor: 'city',
-    cube: LA_CUBE, // riusa i temi colore esistenti
+    bg: 'boulevard', // sfondo immagine boulevard.webp (loop)
+    floor: 'boulevard', // strada azzurra ad assi
+    cube: LA_CUBE,
     ship: LA_SHIP,
-    scrollSpeed: 585, // identico a Skyline (livello 4)
-    mapKey: 'skyline2',
-    diffFrac: 0.55, // barra "medio" nel menu
+    scrollSpeed: 585,
+    mapKey: 'boulevard', // duplicato di skyline (da modificare)
+    diffFrac: 0.55,
   },
 ];
 
@@ -163,9 +185,11 @@ export const GLOW_COLOR = '#ffffff';
 export const GLOW_BLUR = 14; // raggio del blur in unità logiche
 export const EDGE_COLOR = '#ffffff'; // bordo bianco luminoso generico
 
-// Cubo: bordo bianco + quadratino interno scuro.
+// Cubo: bordo bianco + riempimento a gradiente (stile triangoli, niente griglia interna).
 export const PLAYER_EDGE = '#ffffff';
-export const PLAYER_INNER = '#102015';
+export const PLAYER_INNER = '#102015'; // ancora usato per l'oblò del razzo
+export const PLAYER_FILL_TOP = '#aaff8c'; // gradiente cubo: verde chiaro in alto
+export const PLAYER_FILL_BOTTOM = '#3fb81f'; // gradiente cubo: verde scuro in basso
 
 // --- Gameplay ---------------------------------------------------------------
 // Velocità di scorrimento orizzontale del mondo (unità logiche / secondo).

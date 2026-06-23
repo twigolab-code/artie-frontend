@@ -15,17 +15,18 @@ import { Camera } from './game/Camera.js';
 import { Particles } from './effects/Particles.js';
 import { Trail } from './effects/Trail.js';
 import { StarTrail } from './effects/StarTrail.js';
+import { RocketField } from './effects/RocketField.js';
 import { PortalFx } from './effects/PortalFx.js';
 import { Background } from './effects/Background.js';
 import { CityBackground } from './effects/CityBackground.js';
 import { ImageBackground } from './effects/ImageBackground.js';
 import { LaBackground } from './effects/LaBackground.js';
-import { level2 } from './data/level2.js';
-import { la } from './data/la.js';
-import { metro } from './data/metro.js';
 import { skyline } from './data/skyline.js';
 import { skyline2 } from './data/skyline2.js';
-import { getSkin, LOGO_IMG, BG2_IMG, COIN_IMG, OPTIONS_IMG, STATS_IMG, getLaBgImg, fontState } from './engine/Assets.js';
+import { metro2 } from './data/metro2.js';
+import { carwash } from './data/carwash.js';
+import { boulevard } from './data/boulevard.js';
+import { getSkin, LOGO_IMG, BG2_IMG, COIN_IMG, OPTIONS_IMG, STATS_IMG, getLevelBg, fontState } from './engine/Assets.js';
 import { aabbOverlap } from './game/Collision.js';
 import {
   FIXED_DT,
@@ -49,6 +50,18 @@ import {
   LA_FLOOR_COLOR,
   LA_FLOOR_LINE,
   LA_FLOOR_PLANK,
+  METRO_FLOOR_COLOR,
+  METRO_FLOOR_TILE,
+  METRO_FLOOR_LINE,
+  WASH_FLOOR_COLOR,
+  WASH_FLOOR_BRICK,
+  WASH_FLOOR_EDGE,
+  BLVD_FLOOR_COLOR,
+  BLVD_FLOOR_PLANK,
+  BLVD_FLOOR_LINE,
+  ROCKET_FLOOR_COLOR,
+  ROCKET_FLOOR_LINE,
+  ROCKET_TINT,
   PAD_VELOCITY,
   LEVELS,
   PLAYERS,
@@ -70,8 +83,9 @@ function uiFont(spec) {
 }
 
 // Mappe disponibili, indicizzate per mapKey del livello.
-// level2 = Città (facile) · la = Los Angeles (medio) · metro = Metro (difficile).
-const MAPS = { level2, la, metro, skyline, skyline2 };
+// skyline = City · skyline2 = Los Angeles · metro2/carwash/boulevard = nuovi
+// (per ora duplicati di skyline, da differenziare).
+const MAPS = { skyline, skyline2, metro2, carwash, boulevard };
 
 // --- Tema colore dello sfondo (transizione morbida tra le sezioni) ----------
 // Lerp RGB di due colori hex -> stringa 'rgb(...)'.
@@ -98,6 +112,7 @@ const camera = new Camera();
 const particles = new Particles();
 const trail = new Trail();
 const starTrail = new StarTrail();
+const rocketField = new RocketField(); // atmosfera di sfondo in modalità razzo
 const portalFx = new PortalFx();
 
 // Tempo accumulato (per la pulsazione/rotazione dei portali).
@@ -106,12 +121,14 @@ let elapsed = 0;
 let menuTime = 0;
 
 // Sfondi condivisi (riusati dai livelli secondo il loro `bg`).
-// `losangeles` usa l'immagine piu' pesante: costruito pigramente alla prima
-// richiesta (getBg) cosi' la home non scarica `bg-los-angeles.webp`.
+// Gli sfondi a immagine (losangeles/metro/carwash/boulevard) usano gli asset piu'
+// pesanti: costruiti pigramente alla prima richiesta (getBg) cosi' la home non li
+// scarica. IMG_BG mappa la chiave `bg` del livello al nome del file in public/.
 const BACKGROUNDS = { neon: new Background(), city: new CityBackground(), la: new LaBackground() };
+const IMG_BG = { losangeles: 'LA', metro: 'metro', carwash: 'wash', boulevard: 'boulevard' };
 function getBg(key) {
-  if (key === 'losangeles' && !BACKGROUNDS.losangeles) {
-    BACKGROUNDS.losangeles = new ImageBackground(getLaBgImg());
+  if (IMG_BG[key] && !BACKGROUNDS[key]) {
+    BACKGROUNDS[key] = new ImageBackground(getLevelBg(IMG_BG[key]));
   }
   return BACKGROUNDS[key];
 }
@@ -138,8 +155,16 @@ function themeFor(t) {
   };
 }
 
-// Stato schermate: 'home' | 'players' | 'levels' | 'playing'.
-let gameState = 'home';
+// Stato schermate: 'prehome' | 'home' | 'players' | 'levels' | 'playing'.
+// 'prehome' è la schermata d'ingresso (nickname + Gioca, senza musica): si parte
+// da qui e si passa a 'home' premendo Gioca, dove parte la musica.
+let gameState = 'prehome';
+
+// Nickname del giocatore (richiesto nella pre-home, persistito in localStorage).
+let nickname = getNickname();
+
+// Pausa durante il gioco: ferma l'update (la fisica), il render continua.
+let isPaused = false;
 
 // Livello corrente (ricreato in startLevel) e relativi dati.
 let level = new Level(MAPS[lvl().mapKey]);
@@ -190,6 +215,7 @@ function startLevel() {
 }
 
 function restart() {
+  isPaused = false; // ogni nuovo tentativo riparte non in pausa
   camera.reset();
   player.reset(camera.x + PLAYER_X);
   player.setMode('cube');
@@ -216,6 +242,12 @@ function restart() {
 
 // --- Input delle schermate (home / players / levels) ------------------------
 window.addEventListener('keydown', (e) => {
+  if (gameState === 'prehome') {
+    // Invio avvia se c'è un nickname. Quando il focus è sull'<input>, l'Enter è
+    // già gestito dal suo listener: qui copriamo solo il caso senza focus.
+    if (e.code === 'Enter' && document.activeElement !== nickInput && nickname.length) goHome();
+    return;
+  }
   if (gameState === 'home') {
     if (e.code === 'Space' || e.code === 'Enter') gameState = 'levels';
     else if (e.code === 'KeyP') gameState = 'players';
@@ -247,12 +279,25 @@ window.addEventListener('keydown', (e) => {
       gameState = 'levels';
       audio.setTrack('home'); // tornando ai menu riparte la musica della Home
     }
+  } else if (gameState === 'playing') {
+    // Esc / P: alterna pausa. Uscendo dalla pausa scarto l'edge del tasto così
+    // non parte un salto nel frame della ripresa.
+    if (e.code === 'Escape' || e.code === 'KeyP') {
+      isPaused = !isPaused;
+      if (!isPaused) input.consumePress();
+    }
   }
 });
 
 // Click: bottoni Home, frecce di navigazione, conferma.
 canvas.addEventListener('mousedown', (e) => {
   const p = toLogical(e);
+  if (gameState === 'prehome') {
+    // Solo il bottone Gioca (abilitato se c'è un nickname). Il click sul campo è
+    // gestito dall'<input> HTML sovrapposto, non dal canvas.
+    if (nickname.length && pointInRect(p, preHomeRects().play)) goHome();
+    return;
+  }
   if (gameState === 'home') {
     if (pointInRect(p, homeBtns().start)) gameState = 'levels';
     else if (pointInRect(p, homeBtns().player)) gameState = 'players';
@@ -262,13 +307,19 @@ canvas.addEventListener('mousedown', (e) => {
     gameState = 'home'; // click ovunque (inclusa la freccia) torna alla Home
   } else if (gameState === 'options') {
     const r = optionRects();
-    if (pointInRect(p, r.musicMinus)) changeMusicVol(-1);
+    if (pointInRect(p, backArrowRect())) gameState = 'home';
+    else if (pointInRect(p, r.musicMinus)) changeMusicVol(-1);
     else if (pointInRect(p, r.musicPlus)) changeMusicVol(+1);
     else if (pointInRect(p, r.sfxMinus)) changeSfxVol(-1);
     else if (pointInRect(p, r.sfxPlus)) changeSfxVol(+1);
     else if (pointInRect(p, r.mute)) toggleMute();
     else if (pointInRect(p, r.back)) gameState = 'home';
   } else if (gameState === 'players') {
+    // Freccia "indietro" in alto a sinistra → Home (ha priorità).
+    if (pointInRect(p, backArrowRect())) {
+      gameState = 'home';
+      return;
+    }
     // Click su un cubo: se è già selezionato, conferma (torna a Home);
     // altrimenti lo seleziona. Click altrove = conferma.
     const hit = playerSlots().find((s) => pointInRect(p, s));
@@ -279,6 +330,11 @@ canvas.addEventListener('mousedown', (e) => {
       gameState = 'home';
     }
   } else if (gameState === 'levels') {
+    // Freccia "indietro" in alto a sinistra → Home (ha priorità sul "click = gioca").
+    if (pointInRect(p, backArrowRect())) {
+      gameState = 'home';
+      return;
+    }
     const ar = arrowRects();
     if (pointInRect(p, ar.left)) levelIndex = (levelIndex + LEVELS.length - 1) % LEVELS.length;
     else if (pointInRect(p, ar.right)) levelIndex = (levelIndex + 1) % LEVELS.length;
@@ -286,7 +342,89 @@ canvas.addEventListener('mousedown', (e) => {
   } else if (gameState === 'complete') {
     input.consumePress(); // scarta l'edge del click così non parte un salto
     startLevel(); // click = rigioca lo stesso livello
+  } else if (gameState === 'playing') {
+    if (!isPaused) {
+      // Click sul tastino pausa (cerchio in alto a destra) → mette in pausa.
+      // Scarto l'edge così questo click non viene letto come salto.
+      if (pointInPauseBtn(p)) {
+        isPaused = true;
+        input.consumePress();
+      }
+    } else {
+      // Overlay di pausa: RIPRENDI / RICOMINCIA / ESCI.
+      const r = pauseOverlayRects();
+      if (pointInRect(p, r.resume)) {
+        isPaused = false;
+        input.consumePress();
+      } else if (pointInRect(p, r.restart)) {
+        startLevel(); // azzera isPaused via restart()
+        input.consumePress();
+      } else if (pointInRect(p, r.exit)) {
+        isPaused = false;
+        gameState = 'levels';
+        audio.setTrack('home');
+        input.consumePress();
+      } else {
+        // Click fuori dai bottoni in pausa: non deve innescare un salto.
+        input.consumePress();
+      }
+    }
   }
+});
+
+// --- Campo nickname: <input> HTML sovrapposto al canvas (solo in pre-home) ---
+// Un vero <input> dà tastiera mobile nativa, cursore e incolla "gratis". È
+// trasparente (lo sfondo/cornice li disegna il canvas in drawPreHome) e viene
+// posizionato sopra il rettangolo logico del campo via positionNickInput().
+const nickInput = document.createElement('input');
+nickInput.type = 'text';
+nickInput.maxLength = 16;
+nickInput.placeholder = 'NICKNAME';
+nickInput.value = nickname;
+nickInput.setAttribute('aria-label', 'Il tuo nickname');
+Object.assign(nickInput.style, {
+  position: 'absolute',
+  display: 'none',
+  boxSizing: 'border-box',
+  margin: '0',
+  padding: '0 14px',
+  border: 'none',
+  outline: 'none',
+  background: 'transparent',
+  color: UI.text,
+  fontFamily: UI_FONT,
+  textAlign: 'center',
+  letterSpacing: '1px',
+  textShadow: '0 2px 0 ' + UI.outline,
+  caretColor: UI.green,
+});
+document.body.appendChild(nickInput);
+nickInput.addEventListener('input', () => {
+  nickname = nickInput.value.trim();
+  saveNickname(nickname);
+});
+// Invio dal campo: avvia (solo se il nickname non è vuoto).
+nickInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && nickname.length) goHome();
+});
+
+// Posiziona/dimensiona l'<input> sopra il rettangolo logico del campo, con la
+// stessa matematica (inversa) del letterbox usata in toLogical.
+function positionNickInput() {
+  const r = preHomeRects().field;
+  const rect = canvas.getBoundingClientRect();
+  const scale = Math.min(rect.width / LOGICAL_WIDTH, rect.height / LOGICAL_HEIGHT);
+  const offX = (rect.width - LOGICAL_WIDTH * scale) / 2;
+  const offY = (rect.height - LOGICAL_HEIGHT * scale) / 2;
+  nickInput.style.left = rect.left + offX + r.x * scale + 'px';
+  nickInput.style.top = rect.top + offY + r.y * scale + 'px';
+  nickInput.style.width = r.w * scale + 'px';
+  nickInput.style.height = r.h * scale + 'px';
+  nickInput.style.fontSize = 30 * scale + 'px';
+}
+// Mantiene l'allineamento al resize finché siamo in pre-home.
+window.addEventListener('resize', () => {
+  if (gameState === 'prehome') positionNickInput();
 });
 
 function init() {
@@ -304,7 +442,7 @@ function update(dt) {
 
   menuTime += dt; // tempo per le animazioni delle schermate (cubo della Home)
 
-  if (gameState !== 'playing') return; // nelle schermate il gioco è fermo
+  if (gameState !== 'playing' || isPaused) return; // schermate o pausa: gioco fermo
 
   elapsed += dt; // tempo per la pulsazione dei portali
   portalFx.update(dt); // effetto passaggio (sempre attivo)
@@ -486,6 +624,22 @@ function saveBestCoins(id, n) {
   }
 }
 
+// --- Nickname del giocatore (localStorage) ---------------------------------
+function getNickname() {
+  try {
+    return localStorage.getItem('gd_nickname') || '';
+  } catch {
+    return '';
+  }
+}
+function saveNickname(name) {
+  try {
+    localStorage.setItem('gd_nickname', name);
+  } catch {
+    // ambiente senza localStorage: nessuna persistenza, ma il gioco continua.
+  }
+}
+
 // --- Statistiche per livello (localStorage): % migliore, tentativi e salti
 // TOTALI cumulativi tra tutte le sessioni. -----------------------------------
 function getStats(id) {
@@ -574,6 +728,12 @@ function toggleMute() {
 function render(alpha) {
   renderer.begin();
 
+  // L'<input> del nickname è visibile solo nella pre-home: nascondilo altrove.
+  if (gameState !== 'prehome' && nickInput.style.display !== 'none') {
+    nickInput.style.display = 'none';
+  }
+
+  if (gameState === 'prehome') return drawPreHome();
   if (gameState === 'home') return drawHome();
   if (gameState === 'players') return drawPlayers();
   if (gameState === 'levels') return drawLevels();
@@ -589,6 +749,10 @@ function render(alpha) {
   const beatPulse = beatPulseValue();
   currentBg().render(renderer, camX, beatPulse, themeFor(themeT));
 
+  // Atmosfera razzo DIETRO al gameplay: stelle + linee di velocità (solo se in
+  // razzo, intensità pilotata da themeT).
+  rocketField.render(renderer, camX, themeT, beatPulse);
+
   drawFloor(camX);
   level.render(renderer, camX, elapsed); // time -> pulsazione portali
 
@@ -600,10 +764,43 @@ function render(alpha) {
   if (player.alive) player.render(renderer, camera.x);
   particles.render(renderer, camX);
 
+  // Velo + vignette colorata SOPRA al gameplay quando il razzo è attivo.
+  drawRocketAmbiance(themeT, beatPulse);
+
   drawHud();
   drawProgressBar();
 
   portalFx.renderFlash(renderer); // lampo a tutto schermo (sopra al gameplay)
+
+  // Tastino pausa / overlay di pausa (sopra a tutto).
+  if (isPaused) drawPauseOverlay();
+  else drawPauseButton();
+}
+
+// Velo tinta + vignette ai bordi quando il cubo è razzo (alpha ∝ themeT).
+function drawRocketAmbiance(t, beatPulse) {
+  if (t <= 0.02) return;
+  const ctx = renderer.ctx;
+  const x = renderer.extLeft;
+  const y = renderer.extTop;
+  const w = renderer.extRight - renderer.extLeft;
+  const h = renderer.extBottom - renderer.extTop;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  ctx.save();
+  // Velo uniforme leggero (pulsa appena sul beat).
+  ctx.globalAlpha = t * 0.10 * (0.85 + 0.15 * beatPulse);
+  ctx.fillStyle = ROCKET_TINT;
+  ctx.fillRect(x, y, w, h);
+  // Vignette: trasparente al centro → tinta ai bordi.
+  const g = ctx.createRadialGradient(cx, cy, h * 0.25, cx, cy, Math.max(w, h) * 0.62);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, ROCKET_TINT);
+  ctx.globalAlpha = t * 0.22;
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+  ctx.globalAlpha = 1;
 }
 
 // ===========================================================================
@@ -622,6 +819,26 @@ function pointInRect(p, r) {
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
 }
 
+
+// Rettangoli della schermata pre-home (campo nickname + bottone Gioca). Usati
+// sia dal rendering sia dal click-test sia dal posizionamento dell'<input>.
+function preHomeRects() {
+  const cx = LOGICAL_WIDTH / 2;
+  // Card centrale, leggermente sotto il logo.
+  const cardW = 600;
+  const cardH = 280;
+  const cardX = cx - cardW / 2;
+  const cardY = 300;
+  const fieldW = 460;
+  const fieldH = 72;
+  const playW = 300;
+  const playH = 76;
+  return {
+    card: { x: cardX, y: cardY, w: cardW, h: cardH },
+    field: { x: cx - fieldW / 2, y: cardY + 74, w: fieldW, h: fieldH },
+    play: { x: cx - playW / 2, y: cardY + cardH - playH - 30, w: playW, h: playH },
+  };
+}
 
 // Bottoni della Home (rettangoli cliccabili).
 function homeBtns() {
@@ -765,6 +982,67 @@ function dots(n, active, cx, y) {
   }
 }
 
+// --- Pausa (tastino in gioco + overlay) ------------------------------------
+// Tastino pausa: cerchio translucido in alto a destra (stile reference).
+function pauseBtnCircle() {
+  // Il più a destra possibile: ancorato al bordo REALE del canvas (extRight,
+  // che include la banda letterbox sugli schermi larghi), anello a ~12px dal
+  // bordo, allineato verticalmente alla barra del percorso (centro y=33).
+  const r = 28;
+  return { cx: renderer.extRight - 12 - r, cy: 33, r };
+}
+function pointInPauseBtn(p) {
+  const c = pauseBtnCircle();
+  const dx = p.x - c.cx;
+  const dy = p.y - c.cy;
+  return dx * dx + dy * dy <= (c.r + 8) * (c.r + 8); // +8 tolleranza tocco
+}
+// Disegna il tastino pausa: anello sottile + due barrette verticali, discreto.
+function drawPauseButton() {
+  const ctx = renderer.ctx;
+  const { cx, cy, r } = pauseBtnCircle();
+  ctx.save();
+  // Anello.
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  // Due barrette (icona pausa).
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  const bw = r * 0.22;
+  const bh = r * 0.9;
+  ctx.fillRect(cx - bw - bw * 0.6, cy - bh / 2, bw, bh);
+  ctx.fillRect(cx + bw * 0.6, cy - bh / 2, bw, bh);
+  ctx.restore();
+}
+// Rettangoli dei bottoni dell'overlay di pausa.
+function pauseOverlayRects() {
+  const cx = LOGICAL_WIDTH / 2;
+  const bw = 320;
+  const bh = 66;
+  const x = cx - bw / 2;
+  return {
+    resume: { x, y: 300, w: bw, h: bh },
+    restart: { x, y: 384, w: bw, h: bh },
+    exit: { x, y: 468, w: bw, h: bh },
+  };
+}
+// Overlay di pausa: velo scuro + titolo + 3 bottoni.
+function drawPauseOverlay() {
+  const ctx = renderer.ctx;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(renderer.extLeft, renderer.extTop, renderer.extRight - renderer.extLeft, renderer.extBottom - renderer.extTop);
+  ctx.restore();
+
+  text('PAUSA', LOGICAL_WIDTH / 2, 220, 64, UI.yellow);
+  const r = pauseOverlayRects();
+  button(r.resume, 'RIPRENDI', UI.green);
+  button(r.restart, 'RICOMINCIA', UI.blue);
+  button(r.exit, 'ESCI', '#8a3ff0');
+}
+
 // Sfondo di anteprima comune alle schermate (sfondo del livello evidenziato).
 function screenBackdrop() {
   const ctx = renderer.ctx;
@@ -853,6 +1131,69 @@ function drawHomeCube() {
     ctx.fillRect(-size / 2, -size / 2, size, size);
   }
   ctx.restore();
+}
+
+// Lascia la pre-home: nasconde l'input, avvia la musica della Home e passa allo
+// stato 'home'. L'AudioContext è già sbloccato dal click/tasto su Gioca.
+function goHome() {
+  nickInput.style.display = 'none';
+  nickInput.blur();
+  audio.setTrack('home');
+  gameState = 'home';
+}
+
+// Schermata d'ingresso: logo + card con campo nickname e bottone Gioca. Nessuna
+// musica (è la home a farla partire via goHome). Il testo del campo è disegnato
+// dall'<input> HTML sovrapposto (vedi positionNickInput); qui disegniamo solo
+// sfondo, cornice e UI di contorno.
+function drawPreHome() {
+  const ctx = renderer.ctx;
+  const cx = LOGICAL_WIDTH / 2;
+  if (BG2_IMG.ready) drawCover(BG2_IMG);
+  else screenBackdrop();
+  // Vela scura extra per dare risalto alla card.
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(renderer.extLeft, renderer.extTop, renderer.extRight - renderer.extLeft, renderer.extBottom - renderer.extTop);
+
+  // Logo in alto (come in Home).
+  if (LOGO_IMG.ready) {
+    const w = LOGICAL_WIDTH * 0.4;
+    const ratio = LOGO_IMG.img.naturalWidth / LOGO_IMG.img.naturalHeight;
+    const h = w / ratio;
+    ctx.drawImage(LOGO_IMG.img, (LOGICAL_WIDTH - w) / 2, 60, w, h);
+  } else {
+    text('OG DASH', cx, 150, 64);
+  }
+
+  const r = preHomeRects();
+
+  // Card centrale.
+  panel(r.card.x, r.card.y, r.card.w, r.card.h, 'rgba(20,16,46,0.85)');
+
+  // Etichetta.
+  text('Il tuo nickname', cx, r.card.y + 50, 30);
+
+  // Cornice del campo (il testo lo mostra l'<input> sovrapposto).
+  ctx.save();
+  roundRect(ctx, r.field.x, r.field.y, r.field.w, r.field.h, 14);
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  ctx.fill();
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = UI.outline;
+  roundRect(ctx, r.field.x, r.field.y, r.field.w, r.field.h, 14);
+  ctx.stroke();
+  ctx.restore();
+
+  // Bottone Gioca: verde se c'è un nickname, grigio (disabilitato) se vuoto.
+  const enabled = nickname.length > 0;
+  button(r.play, 'GIOCA', enabled ? UI.green : 'rgba(120,120,130,0.6)');
+
+  // Hint in basso.
+  text('Premi INVIO per giocare', cx, LOGICAL_HEIGHT - 46, 18, 'rgba(255,255,255,0.85)');
+
+  // Mostra e allinea l'<input> sopra la cornice del campo.
+  nickInput.style.display = 'block';
+  positionNickInput();
 }
 
 function drawHome() {
@@ -975,6 +1316,9 @@ function drawLevels() {
   arrow(ar.right, +1);
   dots(LEVELS.length, levelIndex, LOGICAL_WIDTH / 2, py + ph + 46);
 
+  // Freccia "indietro" in alto a sinistra.
+  arrow(backArrowRect(), -1);
+
   const hint = L.comingSoon
     ? 'PROSSIMAMENTE   •   ESC INDIETRO'
     : 'SPAZIO / CLICK PER GIOCARE   •   ESC INDIETRO';
@@ -1025,15 +1369,15 @@ function optionRects() {
   const cx = LOGICAL_WIDTH / 2;
   const bw = 60; // lato dei bottoni +/-
   const off = 150; // distanza dei +/- dal centro
-  const musicY = 250;
-  const sfxY = 340;
+  const musicY = 240; // riga MUSICA
+  const sfxY = 360; // riga EFFETTI (più distanziata, le % non si sovrappongono)
   return {
     musicMinus: { x: cx - off - bw, y: musicY, w: bw, h: bw },
     musicPlus: { x: cx + off, y: musicY, w: bw, h: bw },
     sfxMinus: { x: cx - off - bw, y: sfxY, w: bw, h: bw },
     sfxPlus: { x: cx + off, y: sfxY, w: bw, h: bw },
-    mute: { x: cx - 150, y: 420, w: 300, h: 64 },
-    back: { x: cx - 150, y: 500, w: 300, h: 64 },
+    mute: { x: cx - 150, y: 470, w: 300, h: 64 },
+    back: { x: cx - 150, y: 548, w: 300, h: 64 },
   };
 }
 
@@ -1042,38 +1386,46 @@ function drawOptions() {
   screenBackdrop();
 
   const pw = 720;
-  const ph = 420;
+  const ph = 500;
   const px = (LOGICAL_WIDTH - pw) / 2;
-  const py = (LOGICAL_HEIGHT - ph) / 2 - 30;
+  const py = (LOGICAL_HEIGHT - ph) / 2 - 20;
   panel(px, py, pw, ph, 'rgba(10,8,24,0.82)');
 
-  text('OPZIONI', LOGICAL_WIDTH / 2, py + 70, 50, UI.yellow);
+  text('OPZIONI', LOGICAL_WIDTH / 2, py + 64, 50, UI.yellow);
 
   const r = optionRects();
   const cx = LOGICAL_WIDTH / 2;
 
-  // Riga MUSICA.
-  text('MUSICA', cx, r.musicMinus.y - 16, 26);
+  // Riga MUSICA: etichetta sopra i bottoni, % centrata tra −/+.
+  text('MUSICA', cx, r.musicMinus.y - 22, 28, UI.yellow);
   button(r.musicMinus, '−', UI.blue);
   button(r.musicPlus, '+', UI.blue);
-  text(`${Math.round(audio.musicVolume * 100)}%`, cx, r.musicMinus.y + 44, 34);
+  text(`${Math.round(audio.musicVolume * 100)}%`, cx, r.musicMinus.y + r.musicMinus.h / 2 + 12, 36);
 
   // Riga EFFETTI.
-  text('EFFETTI', cx, r.sfxMinus.y - 16, 26);
+  text('EFFETTI', cx, r.sfxMinus.y - 22, 28, UI.yellow);
   button(r.sfxMinus, '−', UI.blue);
   button(r.sfxPlus, '+', UI.blue);
-  text(`${Math.round(audio.sfxVolume * 100)}%`, cx, r.sfxMinus.y + 44, 34);
+  text(`${Math.round(audio.sfxVolume * 100)}%`, cx, r.sfxMinus.y + r.sfxMinus.h / 2 + 12, 36);
 
   // Mute + Indietro.
   button(r.mute, audio.muted ? 'AUDIO: OFF' : 'AUDIO: ON', audio.muted ? '#a02020' : UI.green);
   button(r.back, 'INDIETRO', '#8a3ff0');
 
+  // Freccia "indietro" in alto a sinistra (coerente con le altre schermate).
+  arrow(backArrowRect(), -1);
+
   text('ESC = INDIETRO', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 36, 20, 'rgba(255,255,255,0.9)');
 }
 
-// Rettangolo cliccabile della freccia "indietro" (in alto a sinistra) di STATS.
-function statsBackRect() {
+// Rettangolo cliccabile della freccia "indietro" (in alto a sinistra), condiviso
+// tra le schermate di menu (players/levels/options/stats).
+function backArrowRect() {
   return { x: 40, y: 40, w: 110, h: 96 };
+}
+// Alias storico usato da STATS.
+function statsBackRect() {
+  return backArrowRect();
 }
 
 // Schermata STATS dedicata, stile GD: titolo + pannello con righe alternate
@@ -1193,6 +1545,9 @@ function drawPlayers() {
     if (sel) text(P.name.toUpperCase(), slot.cx, slot.y + slot.h + 50, 40);
   }
 
+  // Freccia "indietro" in alto a sinistra.
+  arrow(backArrowRect(), -1);
+
   text('←  →  / CLICK PER SCEGLIERE   •   SPAZIO PER CONFERMARE', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 50, 22, 'rgba(255,255,255,0.9)');
 }
 
@@ -1205,14 +1560,19 @@ function beatPulseValue() {
 // Pavimento: stile in base alla location corrente. Copre tutta la larghezza
 // reale (extLeft..extRight) per non lasciare bande.
 function drawFloor(camX) {
-  if (lvl().floor === 'la') drawFloorLa(camX);
-  else if (lvl().floor === 'city') drawFloorCity(camX);
+  const f = lvl().floor;
+  if (f === 'la') drawFloorLa(camX);
+  else if (f === 'city') drawFloorCity(camX);
+  else if (f === 'metro') drawFloorMetro(camX);
+  else if (f === 'carwash') drawFloorCarWash(camX);
+  else if (f === 'boulevard') drawFloorBoulevard(camX);
   else drawFloorNeon(camX);
 }
 
-// Los Angeles: passeggiata/lungomare. Fascia base + assi verticali scorrevoli
-// + bordo superiore chiaro. Copre tutta la larghezza reale (extLeft..extRight).
-function drawFloorLa(camX) {
+// Passeggiata/strada ad assi: fascia base + assi verticali scorrevoli + bordo
+// superiore chiaro. Condivisa da LA (viola) e Boulevard (azzurro), variando i
+// colori. Copre tutta la larghezza reale (extLeft..extRight).
+function drawPlankFloor(camX, base, plank, line, period = 46) {
   const ctx = renderer.ctx;
   const L = renderer.extLeft;
   const R = renderer.extRight;
@@ -1220,12 +1580,11 @@ function drawFloorLa(camX) {
   const B = renderer.extBottom;
 
   // Fascia base.
-  ctx.fillStyle = LA_FLOOR_COLOR;
+  ctx.fillStyle = base;
   ctx.fillRect(L, FLOOR_Y, W, B - FLOOR_Y);
 
-  // Assi della passeggiata: linee verticali a periodo fisso che scorrono.
-  const period = 46;
-  ctx.strokeStyle = LA_FLOOR_PLANK;
+  // Assi: linee verticali a periodo fisso che scorrono.
+  ctx.strokeStyle = plank;
   ctx.lineWidth = 3;
   ctx.beginPath();
   const off = ((camX % period) + period) % period;
@@ -1236,12 +1595,66 @@ function drawFloorLa(camX) {
   ctx.stroke();
 
   // Bordo superiore chiaro.
-  ctx.strokeStyle = LA_FLOOR_LINE;
+  ctx.strokeStyle = line;
   ctx.lineWidth = 4;
   ctx.beginPath();
   ctx.moveTo(L, FLOOR_Y);
   ctx.lineTo(R, FLOOR_Y);
   ctx.stroke();
+}
+
+// Los Angeles: passeggiata/lungomare viola.
+function drawFloorLa(camX) {
+  drawPlankFloor(camX, LA_FLOOR_COLOR, LA_FLOOR_PLANK, LA_FLOOR_LINE);
+}
+
+// Boulevard: strada ad assi azzurra (stessa logica passeggiata, palette blu).
+function drawFloorBoulevard(camX) {
+  drawPlankFloor(camX, BLVD_FLOOR_COLOR, BLVD_FLOOR_PLANK, BLVD_FLOOR_LINE);
+}
+
+// Metro: banchina viola chiaro uniforme + piastrelle larghe (texture minima) +
+// bordo superiore chiaro. Riquadri grandi che scorrono con la camera.
+function drawFloorMetro(camX) {
+  const ctx = renderer.ctx;
+  const L = renderer.extLeft;
+  const R = renderer.extRight;
+  const W = R - L;
+  const B = renderer.extBottom;
+
+  // Fascia base.
+  ctx.fillStyle = METRO_FLOOR_COLOR;
+  ctx.fillRect(L, FLOOR_Y, W, B - FLOOR_Y);
+
+  // Piastrelle larghe: griglia a riquadri grandi (linee chiare).
+  const tileW = 120;
+  const tileH = 60;
+  ctx.strokeStyle = METRO_FLOOR_TILE;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  const off = ((camX % tileW) + tileW) % tileW;
+  for (let x = L - off; x <= R; x += tileW) {
+    ctx.moveTo(x, FLOOR_Y);
+    ctx.lineTo(x, B);
+  }
+  for (let y = FLOOR_Y + tileH; y < B; y += tileH) {
+    ctx.moveTo(L, y);
+    ctx.lineTo(R, y);
+  }
+  ctx.stroke();
+
+  // Bordo superiore chiaro.
+  ctx.strokeStyle = METRO_FLOOR_LINE;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(L, FLOOR_Y);
+  ctx.lineTo(R, FLOOR_Y);
+  ctx.stroke();
+}
+
+// Car Wash: mattoni grigio asfalto (stile City) + bordo superiore rosso neon.
+function drawFloorCarWash(camX) {
+  drawBrickFloor(camX, WASH_FLOOR_COLOR, WASH_FLOOR_BRICK, WASH_FLOOR_EDGE, { neonTop: true });
 }
 
 // Neon (GD): fascia scura + griglia quadrettata scorrevole + linea bianca glow.
@@ -1307,16 +1720,20 @@ function brickRowWidths(rowIndex, period) {
   return widths;
 }
 
-// Tono del mattone variato attorno a CITY_FLOOR_BRICK (h in [0,1)).
-function brickShade(h) {
-  const [r, g, b] = hexToRgb(CITY_FLOOR_BRICK);
+// Tono del mattone variato attorno a `brickColor` (h in [0,1)).
+function brickShade(h, brickColor = CITY_FLOOR_BRICK) {
+  const [r, g, b] = hexToRgb(brickColor);
   const d = Math.round((h - 0.5) * 36); // +/- ~18 di luminosità
   const c = (v) => Math.max(0, Math.min(255, v + d));
   return `rgb(${c(r)},${c(g)},${c(b)})`;
 }
 
-// Città: fascia arancione + texture a mattoni sfalsati irregolari + bordo.
-function drawFloorCity(camX) {
+// Pavimento a mattoni: fascia base (fa da "fuga") + texture a mattoni sfalsati
+// irregolari + bordo superiore. Condiviso da City (mattoni rossi) e Car Wash
+// (mattoni asfalto). `neonTop`=true disegna il bordo con glow (look neon).
+// Mattoni di LUNGHEZZE diverse, file sfalsate, tono variato; ogni fila si ripete
+// su un PERIODO fisso (le larghezze sommano esatte al periodo) -> wrap perfetto.
+function drawBrickFloor(camX, base, brickColor, topLine, { neonTop = false } = {}) {
   const ctx = renderer.ctx;
   const L = renderer.extLeft;
   const R = renderer.extRight;
@@ -1324,34 +1741,25 @@ function drawFloorCity(camX) {
   const B = renderer.extBottom;
 
   // Fascia base (fa anche da "fuga" tra i mattoni).
-  ctx.fillStyle = CITY_FLOOR_COLOR;
+  ctx.fillStyle = base;
   ctx.fillRect(L, FLOOR_Y, W, B - FLOOR_Y);
 
-  // Texture a mattoni "realistica" da muretto: mattoni di LUNGHEZZE diverse
-  // (alcuni lunghi, altri corti), file sfalsate in modo irregolare e tono
-  // leggermente variato. Ogni fila si ripete su un PERIODO fisso (`period`):
-  // i mattoni dentro al periodo hanno larghezze variabili che sommano esatte al
-  // periodo, così il wrap è perfetto e lo scroll resta liscio.
   const bh = 26; // altezza mattone
   const grout = 4; // fuga tra i mattoni
   const period = 380; // lunghezza che si ripete in una fila
 
   let rowIndex = 0;
   for (let y = FLOOR_Y + grout; y < B; y += bh + grout) {
-    // Larghezze dei mattoni del periodo (variabili), normalizzate a `period`.
     const widths = brickRowWidths(rowIndex, period);
-
-    // Sfalsamento irregolare della fila + scroll della camera, modulo periodo.
     const rowShift = period * frand(rowIndex * 3.7);
     let startWorld = -(((camX + rowShift) % period) + period); // due periodi a sinistra
-    // Disegna periodi affiancati finché si copre lo schermo.
-    for (let base = startWorld; base < R - L + period; base += period) {
-      let penX = L + base;
+    for (let baseX = startWorld; baseX < R - L + period; baseX += period) {
+      let penX = L + baseX;
       for (let k = 0; k < widths.length; k++) {
         const w = widths[k];
         if (penX + w > L && penX < R) {
           const h = frand(rowIndex * 13.1 + k * 7.3);
-          ctx.fillStyle = brickShade(h);
+          ctx.fillStyle = brickShade(h, brickColor);
           ctx.fillRect(penX + grout / 2, y, w - grout, bh);
         }
         penX += w;
@@ -1360,13 +1768,38 @@ function drawFloorCity(camX) {
     rowIndex++;
   }
 
-  // Bordo superiore chiaro.
-  ctx.strokeStyle = CITY_FLOOR_LINE;
-  ctx.lineWidth = 4;
+  // Bordo superiore (linea piena, o neon con glow se richiesto).
+  ctx.save();
+  if (neonTop) {
+    ctx.shadowColor = topLine;
+    ctx.shadowBlur = GLOW_BLUR;
+    ctx.lineWidth = 3;
+  } else {
+    ctx.lineWidth = 4;
+  }
+  ctx.strokeStyle = topLine;
   ctx.beginPath();
   ctx.moveTo(L, FLOOR_Y);
   ctx.lineTo(R, FLOOR_Y);
   ctx.stroke();
+  ctx.restore();
+}
+
+// Vira un colore del pavimento verso la tinta "razzo" in base a themeT
+// (0 = colore originale, 1 = razzo). Lascia invariati i colori rgba (linee/assi).
+function rocketFloor(color, rocketColor) {
+  if (themeT <= 0.001 || color[0] !== '#') return color;
+  return lerpColor(color, rocketColor, themeT);
+}
+
+// Città: mattoni rossi + bordo chiaro. In modalità razzo vira al viola/indaco.
+function drawFloorCity(camX) {
+  drawBrickFloor(
+    camX,
+    rocketFloor(CITY_FLOOR_COLOR, ROCKET_FLOOR_COLOR),
+    rocketFloor(CITY_FLOOR_BRICK, ROCKET_FLOOR_COLOR),
+    rocketFloor(CITY_FLOOR_LINE, ROCKET_FLOOR_LINE)
+  );
 }
 
 // Path di una stella a 5 punte (punta in alto) centrata in (ox, oy).
@@ -1468,6 +1901,8 @@ function drawHud() {
   ctx.font = uiFont('26px');
   ctx.lineJoin = 'round';
   ctx.lineWidth = 5;
+  // Il tastino pausa ora è in alto (riga della barra), quindi il contatore
+  // monete può tornare al bordo destro nella sua riga senza sovrapporsi.
   const tx = LOGICAL_WIDTH - 24;
   ctx.strokeStyle = UI.outline;
   ctx.strokeText(label, tx, cyc);
