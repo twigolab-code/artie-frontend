@@ -26,11 +26,17 @@ doc: read it first so you don't have to re-explore the codebase. Code comments a
   `vite.config.js` uses `base: './'` (relative paths). The vector fallback in `Assets.js` covers a
   missing/unsupported image.
 - No test harness. Verify level changes by a static grid walk + playing via `npm run dev`.
-- **Deploy/CI:** hosted on **Cloudflare Pages** (100% static → CDN absorbs any traffic spike; no
-  backend, all state is `localStorage`). `public/_headers` sets edge cache (`/assets/*` immutable,
-  HTML `no-cache`) + security headers. `.github/workflows/deploy.yml` builds and deploys on push to
-  `main` (preview on PR); needs `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` repo secrets and a
-  Pages project named `georush`.
+- **Deploy:** hosted on **Cloudflare Pages** via the **Git integration** (dashboard-driven, not
+  GitHub Actions): Pages clones the repo on push to `main` and runs the build itself. Settings →
+  Builds: build command `npm run build`, output dir `dist`, root `/`; Node pinned to **20** via
+  `.nvmrc`. 100% static → CDN absorbs any traffic spike; no backend, all state is `localStorage`.
+  `public/_headers` sets edge cache (`/assets/*` immutable, HTML `no-cache`) + security headers
+  (a strict same-origin CSP — everything is local, so `default-src 'self'` with `'unsafe-inline'`
+  only for the inline `<style>` in index.html — plus Permissions-Policy / COOP / CORP). If you add
+  an external origin (CDN/font/analytics), widen the CSP accordingly or the game will break.
+  (No `.github/workflows/` — the Actions workflow was removed to avoid clashing with Pages' own
+  build; if "unable to submit build job" appears, it's a Cloudflare-side build incident, check
+  cloudflarestatus.com and retry.)
 
 ## 3. Architecture / directory map
 ```
