@@ -108,32 +108,9 @@ export const LEVELS = [
     floor: 'city',
     cube: LA_CUBE, // riusa i temi colore esistenti
     ship: LA_SHIP,
-    scrollSpeed: 585,
+    obstacleBottom: '#8a1410', // bottom gradiente ostacoli coerente col floor rosso
+    scrollSpeed: 630,
     mapKey: 'skyline',
-    diffFrac: 0.55,
-  },
-  {
-    id: 'losangeles',
-    name: 'Los Angeles',
-    diff: 'Medio',
-    bg: 'losangeles', // sfondo immagine LA.webp (loop)
-    floor: 'la', // passeggiata viola
-    cube: LA_CUBE,
-    ship: LA_SHIP,
-    scrollSpeed: 585,
-    mapKey: 'skyline2',
-    diffFrac: 0.55,
-  },
-  {
-    id: 'metro',
-    name: 'Metro',
-    diff: 'Medio',
-    bg: 'metro', // sfondo immagine metro.webp (loop)
-    floor: 'metro', // banchina viola chiaro
-    cube: LA_CUBE,
-    ship: LA_SHIP,
-    scrollSpeed: 585,
-    mapKey: 'metro2', // duplicato di skyline (da modificare)
     diffFrac: 0.55,
   },
   {
@@ -144,8 +121,22 @@ export const LEVELS = [
     floor: 'carwash', // asfalto scuro + bordo rosso neon
     cube: LA_CUBE,
     ship: LA_SHIP,
-    scrollSpeed: 585,
+    obstacleBottom: '#9a1414', // rosso neon scuro, coerente col bordo neon dell'asfalto
+    scrollSpeed: 630,
     mapKey: 'carwash', // duplicato di skyline (da modificare)
+    diffFrac: 0.55,
+  },
+  {
+    id: 'losangeles',
+    name: 'Los Angeles',
+    diff: 'Medio',
+    bg: 'losangeles', // sfondo immagine LA.webp (loop)
+    floor: 'la', // passeggiata viola
+    cube: LA_CUBE,
+    ship: LA_SHIP,
+    obstacleBottom: '#8a3a12', // ambra/arancio scuro, coerente col tramonto LA
+    scrollSpeed: 630,
+    mapKey: 'skyline2',
     diffFrac: 0.55,
   },
   {
@@ -156,8 +147,22 @@ export const LEVELS = [
     floor: 'boulevard', // strada azzurra ad assi
     cube: LA_CUBE,
     ship: LA_SHIP,
-    scrollSpeed: 585,
+    obstacleBottom: '#143a6a', // blu scuro, coerente col floor azzurro
+    scrollSpeed: 630,
     mapKey: 'boulevard', // duplicato di skyline (da modificare)
+    diffFrac: 0.55,
+  },
+  {
+    id: 'metro',
+    name: 'Metro',
+    diff: 'Medio',
+    bg: 'metro', // sfondo immagine metro.webp (loop)
+    floor: 'metro', // banchina viola chiaro
+    cube: LA_CUBE,
+    ship: LA_SHIP,
+    obstacleBottom: '#241a52', // indaco/viola scuro, coerente con la banchina viola
+    scrollSpeed: 630,
+    mapKey: 'metro2', // duplicato di skyline (da modificare)
     diffFrac: 0.55,
   },
 ];
@@ -339,6 +344,16 @@ export const SFX_VOLUME = 0.5; // volume effetti sonori di default (0..1)
 // Brani di sottofondo (loop), uno per contesto. Se un file manca → fallback al
 // beat sintetizzato. 'home' suona nei menu, 'game' durante un livello.
 export const MUSIC_TRACKS = { home: '/home.m4a', game: '/game.mp3' };
+// SFX da file (one-shot), instradati sul gain `sfx` come gli effetti sintetizzati
+// (quindi rispettano volume SFX + mute). Chiave logica → percorso in public/.
+// I "tag" dei player suonano alla selezione nella schermata Player.
+// NB: i file usano l'estensione MAIUSCOLA .MP3 (il CDN di produzione è case-sensitive).
+export const SFX_FILES = {
+  'tag-artie': '/tag-artie.MP3',
+  'tag-miles': '/tag-miles.MP3',
+  'death-artie': '/death-artie.MP3', // suono di morte (sostituisce il tono sintetizzato)
+  loader: '/tag-tutto-fatto.MP3', // jingle del fake loader (prehome → home)
+};
 
 // Barra di avanzamento (stile GD: pillola gialla con bordo bianco).
 export const PROGRESS_BAR_COLOR = '#ffd23f';

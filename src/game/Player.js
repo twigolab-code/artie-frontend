@@ -244,12 +244,14 @@ export class Player {
     return this.x - cameraX;
   }
 
-  render(renderer, cameraX) {
+  // fillBottom: colore "in basso" del gradiente, usato solo nel fallback vettoriale del
+  // cubo (la skin PNG resta invariata). Se assente, fallback a PLAYER_FILL_BOTTOM.
+  render(renderer, cameraX, fillBottom) {
     if (this.mode === 'ship') this._renderShip(renderer, cameraX);
-    else this._renderCube(renderer, cameraX);
+    else this._renderCube(renderer, cameraX, fillBottom);
   }
 
-  _renderCube(renderer, cameraX) {
+  _renderCube(renderer, cameraX, fillBottom) {
     const ctx = renderer.ctx;
     const half = this.size / 2;
     const cx = this.screenX(cameraX) + half;
@@ -268,7 +270,7 @@ export class Player {
       // griglia interna) + bordo glow.
       const grad = ctx.createLinearGradient(0, -half, 0, half);
       grad.addColorStop(0, PLAYER_FILL_TOP);
-      grad.addColorStop(1, PLAYER_FILL_BOTTOM);
+      grad.addColorStop(1, fillBottom || PLAYER_FILL_BOTTOM);
       ctx.fillStyle = grad;
       ctx.fillRect(-half, -half, this.size, this.size);
 

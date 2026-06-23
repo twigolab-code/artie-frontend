@@ -2,7 +2,7 @@
 <html lang="it">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>GeoRush</title>
     <!-- Font display della UI (locale) -->
     <style>
@@ -26,10 +26,98 @@
         height: 100vh;
         touch-action: none;
       }
+
+      /* Overlay "ruota il telefono": mostrato (via JS) solo su dispositivi touch in
+         verticale. Sta sopra il canvas E sopra l'<input> nickname (z-index 10).
+         Palette/font coerenti con la UI del gioco (SoccerLeague + colori di config). */
+      #rotate {
+        display: none; /* attivato in JS -> 'flex' quando portrait su touch */
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 26px;
+        padding: 24px;
+        box-sizing: border-box;
+        background: radial-gradient(circle at 50% 38%, #241a4d 0%, #14102e 70%, #0c0a1f 100%);
+        color: #ffffff;
+        font-family: 'SoccerLeague', system-ui, sans-serif;
+        text-align: center;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      /* Glifo telefono: rettangolo arrotondato bianco con leggero glow, ruota. */
+      #rotate .rotate-phone {
+        width: 76px;
+        height: 132px;
+        border: 6px solid #ffffff;
+        border-radius: 16px;
+        box-shadow: 0 0 18px rgba(255, 255, 255, 0.45);
+        position: relative;
+        animation: rotateHint 1.9s ease-in-out infinite;
+      }
+      /* Capsula altoparlante in alto. */
+      #rotate .rotate-phone::before {
+        content: '';
+        position: absolute;
+        top: 9px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 26px;
+        height: 5px;
+        border-radius: 3px;
+        background: #ffffff;
+      }
+      /* Tasto home in basso. */
+      #rotate .rotate-phone::after {
+        content: '';
+        position: absolute;
+        bottom: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 3px solid #ffffff;
+      }
+      #rotate .rotate-title {
+        font-size: clamp(28px, 8vw, 48px);
+        letter-spacing: 1px;
+        color: #ffd23f;
+        text-shadow: 0 3px 0 #0a0a12;
+      }
+      #rotate .rotate-sub {
+        font-size: clamp(16px, 4.5vw, 24px);
+        color: #ffffff;
+        text-shadow: 0 2px 0 #0a0a12;
+      }
+      @keyframes rotateHint {
+        0%, 38% {
+          transform: rotate(0deg);
+        }
+        62%, 100% {
+          transform: rotate(-90deg);
+        }
+      }
+      /* Accessibilità: niente animazione se l'utente preferisce ridurre il movimento. */
+      @media (prefers-reduced-motion: reduce) {
+        #rotate .rotate-phone {
+          animation: none;
+          transform: rotate(-90deg);
+        }
+      }
     </style>
   </head>
   <body>
     <canvas id="game"></canvas>
+    <!-- Overlay "ruota il telefono" (mostrato via JS in verticale su touch). -->
+    <div id="rotate" aria-hidden="true">
+      <div class="rotate-phone"></div>
+      <div class="rotate-title">RUOTA IL TELEFONO</div>
+      <div class="rotate-sub">Gioca in orizzontale</div>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

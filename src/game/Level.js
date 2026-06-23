@@ -79,7 +79,9 @@ export class Level {
   // Disegna tutto ciò che è visibile (con culling), nell'ordine corretto.
   // Il culling usa i bordi REALI del canvas (extLeft..extRight) con un margine,
   // così gli elementi entrano/escono solo fuori schermo (niente pop-in a metà).
-  render(renderer, cameraX, time = 0) {
+  // fillBottom: colore "in basso" del gradiente degli ostacoli (per-livello), inoltrato
+  // a ob.render. Se assente, gli ostacoli usano il default globale.
+  render(renderer, cameraX, time = 0, fillBottom) {
     const margin = TILE;
     const left = cameraX + renderer.extLeft - margin;
     const right = cameraX + renderer.extRight + margin;
@@ -90,6 +92,6 @@ export class Level {
     for (const o of this.orbs) if (visible(o.x, o.size)) o.render(renderer, cameraX);
     for (const pad of this.pads) if (visible(pad.x, pad.w)) pad.render(renderer, cameraX);
     for (const c of this.coins) if (visible(c.x, c.size)) c.render(renderer, cameraX, time);
-    for (const ob of this.obstacles) if (visible(ob.x, ob.w)) ob.render(renderer, cameraX);
+    for (const ob of this.obstacles) if (visible(ob.x, ob.w)) ob.render(renderer, cameraX, fillBottom);
   }
 }

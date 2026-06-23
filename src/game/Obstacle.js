@@ -73,22 +73,24 @@ export class Obstacle {
     return { x: this.x, y: this.y, w: this.w, h: this.h };
   }
 
-  render(renderer, cameraX) {
+  // fillBottom: colore "in basso" del gradiente (per-livello). Il top resta sempre
+  // OBSTACLE_FILL_TOP (effetto nero in alto). Se assente, fallback al default globale.
+  render(renderer, cameraX, fillBottom) {
     const sx = this.x - cameraX;
     const sy = this.y;
-    if (this.type === TILE_BLOCK) this._renderBlock(renderer, sx, sy);
+    if (this.type === TILE_BLOCK) this._renderBlock(renderer, sx, sy, fillBottom);
     else if (this.type === TILE_SPIKE_FLOOR) this._renderSpikeFloor(renderer, sx, sy);
-    else this._renderSpike(renderer, sx, sy);
+    else this._renderSpike(renderer, sx, sy, fillBottom);
   }
 
-  _renderBlock(renderer, sx, sy) {
+  _renderBlock(renderer, sx, sy, fillBottom) {
     const ctx = renderer.ctx;
     const w = this.w;
     const h = this.h;
 
     const grad = ctx.createLinearGradient(0, sy, 0, sy + h);
     grad.addColorStop(0, OBSTACLE_FILL_TOP);
-    grad.addColorStop(1, OBSTACLE_FILL_BOTTOM);
+    grad.addColorStop(1, fillBottom || OBSTACLE_FILL_BOTTOM);
     ctx.fillStyle = grad;
     ctx.fillRect(sx, sy, w, h);
 
@@ -102,7 +104,7 @@ export class Obstacle {
   }
 
   // Triangolo dello spuntone, orientato/dimensionato in base al tipo.
-  _renderSpike(renderer, sx, sy) {
+  _renderSpike(renderer, sx, sy, fillBottom) {
     const ctx = renderer.ctx;
     const w = this.w;
     const h = this.h;
@@ -128,7 +130,7 @@ export class Obstacle {
 
     const grad = ctx.createLinearGradient(0, sy, 0, sy + h);
     grad.addColorStop(0, OBSTACLE_FILL_TOP);
-    grad.addColorStop(1, OBSTACLE_FILL_BOTTOM);
+    grad.addColorStop(1, fillBottom || OBSTACLE_FILL_BOTTOM);
     ctx.fillStyle = grad;
     ctx.fill();
 

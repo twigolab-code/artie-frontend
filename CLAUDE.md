@@ -47,7 +47,7 @@ src/
     Renderer.js        Canvas2D wrapper; DPR resize + letterbox; logical-coord drawing (begin(), rect(), ctx, extLeft/Top/Right/Bottom)
     GameLoop.js        Fixed-timestep 60Hz loop (accumulator + interpolation alpha)
     Input.js           Keyboard/mouse/touch → jump; held (continuous) + consumePress() (edge, used by orbs)
-    Audio.js           Music: two looped tracks from `MUSIC_TRACKS` (public/ `home.m4a`/`game.mp3`, routed via `music` gain); `setTrack('home'|'game', {restart})` switches them (menus=home, playing=game; game restarts each attempt). Falls back to a synth beat (BPM 128) if files are missing. Beat clock always runs for `beatPhase()` (visual pulse). SFX (coin/death only) are synth. Persistent volume/mute
+    Audio.js           Music: two looped tracks from `MUSIC_TRACKS` (public/ `home.m4a`/`game.mp3`, routed via `music` gain); `setTrack('home'|'game', {restart})` switches them (menus=home, playing=game; game restarts each attempt); `stopMusic()` pauses all tracks immediately (used on death). Falls back to a synth beat (BPM 128) if files are missing. Beat clock always runs for `beatPhase()` (visual pulse). SFX: coin is synth (`_tone`); **file-based one-shots** via `playSfxFile(key)` → bool (fetch→`decodeAudioData`→`AudioBufferSource`, buffers from `SFX_FILES` preloaded in `unlock()`) — the player-select "tag" sounds (`tag-artie`/`tag-miles`), the **death** sound (`death-artie`, `playDeath` falls back to the synth `_tone` if the buffer isn't decoded yet), and the **loader** jingle (`loader` = `tag-tutto-fatto.MP3`). `playSfxOnce(key, onEnded)` is the same pipeline but returns the buffer's `duration` and fires `onEnded` at the end (used by the fake loader to size/finish itself). Both routed via `sfx` gain (respect SFX volume + mute). Music can be silenced per-screen via `setMusicSilenced(bool)` — a `_musicScreenMul` (0/1) multiplied into the `music` gain (single writer `_applyMusicGain()`) WITHOUT touching the persisted `_musicVol`; `main.js` drives it from `gameState` (muted on `players` so the tags stand out). Persistent volume/mute
     Assets.js          Async image cache w/ vector fallback; getSkin(), LOGO_IMG/BG2_IMG/COIN_IMG/PALM_IMG/OPTIONS_IMG/STATS_IMG (all WebP), `getLevelBg(name)` (cached lazy loader for the heavy level bg WebPs `LA`/`metro`/`wash`/`boulevard`, not loaded on home), fontState (local `SoccerLeague` font via @font-face in index.html)
   game/
     Player.js          Cube & Ship entity: gravity, jump, mode switch, collision resolution, rotation, render
@@ -80,24 +80,51 @@ src/
 
 ## 4. Core loop & state machine
 - Fixed timestep: `FIXED_DT = 1/60`, `MAX_FRAME_TIME = 0.25` (caps recovery after a freeze).
-- Game states (in `main.js`): `prehome` · `home` · `players` · `levels` · `playing` · `complete` · `options` · `stats`.
+- Game states (in `main.js`): `prehome` · `loader` · `home` · `players` · `levels` · `playing` · `complete` · `options` · `stats`.
 - **Pre-home (onboarding):** initial state. Shows the logo + a card with a **required** nickname
   field and a `GIOCA` button. **No music plays here** (`Audio._currentTrack` starts `null`, so the
   unlock-on-first-gesture loads files but plays nothing). The nickname uses a real `<input>` overlaid
   on the canvas (`positionNickInput()` mirrors `toLogical`'s letterbox math; shown only on `prehome`,
   hidden elsewhere in `render`). `GIOCA` is greyed/disabled until the nickname is non-empty; clicking
-  it (or Enter) runs `goHome()` → hides the input, calls `audio.setTrack('home')` (music starts here),
-  and switches to `home`. Persisted in `localStorage` `gd_nickname` (`getNickname`/`saveNickname`).
+  it (or Enter) runs `goHome()` → hides the input, plays the `loader` jingle and switches to `loader`
+  (NOT straight to `home`; music starts later in `enterHome()`). Persisted in `localStorage`
+  `gd_nickname` (`getNickname`/`saveNickname`).
+- **Loader (fake loader):** transient state between `prehome` and `home`. `goHome()` calls
+  `audio.playSfxOnce('loader', …)` (the `tag-tutto-fatto.MP3` jingle) and enters `loader`;
+  `drawLoader()` shows a circular neon progress ring (`UI.yellow`) with the player cube spinning at
+  its center, a `%` and **"Mi chiamano \<nickname\>..."**. The ring fills over `loaderDur` (the
+  jingle's real `buffer.duration`); `update(dt)` exits to `home` via `enterHome()` when the sound's
+  `onended` fires (`loaderDone`) **or** the timer passes `loaderDur` (fallback `LOADER_FALLBACK` ≈
+  1.6s when the buffer isn't ready / audio is muted/absent — so it never blocks).
 - The world scrolls left; the player is pinned on screen at `PLAYER_X = 220`, so
   `playerWorldX = camera.x + PLAYER_X`. Level ends when the player reaches the finish X.
 - Per-frame handlers in `update(dt)`: `handleOrbs` (touch + `consumePress` → jump),
   `handlePortals` (mode switch + theme lerp + PortalFx), `handlePads` (auto-jump), `handleCoins`
-  (collect). On death: play SFX once, spawn particles, ~0.7s timer, then restart.
+  (collect). On death: `audio.stopMusic()` (background music cuts immediately so only the death SFX
+  is heard) + play SFX once, spawn particles, ~0.7s timer, then restart (which re-plays `game` from
+  the top via `setTrack('game', {restart:true})`).
 - **Pause:** `let isPaused` flag (reset in `restart()`). During `playing`, `Esc`/`P` or the round
   pause button (top-right, drawn by `drawPauseButton`) toggle it; `update(dt)` early-returns while
   paused so the world freezes but `render()` keeps drawing. Paused overlay (`drawPauseOverlay`) has
   RIPRENDI / RICOMINCIA / ESCI (`pauseOverlayRects`). On any pause click/resume, `input.consumePress()`
   discards the edge so it isn't read as a jump.
+- **Touch / mobile input:** the single canvas UI hit-test handler listens on **`pointerdown`** (NOT
+  `mousedown`) so menus/buttons are tappable on mobile and the desktop mouse still works — one tap =
+  one handler run (no synthetic post-touch `mousedown` double-fire). In-game **jump** is separate:
+  `Input.js` maps keyboard/mouse/`touchstart` → jump on `window`. During `playing` the UI handler
+  only acts on the pause button, so a tap elsewhere falls through to `Input.js` (one jump, no
+  conflict). The pause button's tap tolerance is `+16` logical px (≈44px CSS) in `pointInPauseBtn`;
+  the drawn ring is unchanged.
+- **Force landscape (portrait block):** on touch devices held in portrait the game freezes and a
+  DOM overlay `#rotate` (in `index.html`, styled in the inline `<style>` with the UI palette +
+  `SoccerLeague` font + a CSS-animated phone glyph — no asset, CSP-safe) covers everything incl. the
+  nickname `<input>`. Detected via `matchMedia('(orientation: portrait)')` gated by
+  `'(pointer: coarse)'` (so a narrow desktop window is NOT blocked). `let orientationBlocked` (set by
+  `onOrientationChange`, wired to both media queries' `change` + called once at startup) makes
+  `update(dt)` **early-return before `audio.update()`** (world + beat frozen; player can't die behind
+  the overlay) while `render()` keeps drawing. Entering portrait mid-`playing` sets `isPaused=true`
+  so rotating back lands on the pause overlay, not a death. `drawPreHome()` early-returns (and hides
+  the input) while blocked. The viewport meta uses `viewport-fit=cover`.
 - **Back navigation:** a shared "indietro" arrow (`backArrowRect()` + `arrow(rect,-1)`, top-left) is
   drawn and hit-tested on `players`/`levels`/`options`/`stats` → returns to `home`. On `levels`/`players`
   the arrow is checked first (priority over "click = play"/select).
@@ -117,8 +144,9 @@ src/
   a `RocketField` (stars + warp speed lines) draws behind the gameplay, and `drawRocketAmbiance()`
   lays a faint `ROCKET_TINT` tint + radial vignette over it. All fade in/out smoothly with `themeT`
   and cost nothing in cube mode.
-- **Music follows state:** `prehome` is **silent** (`Audio._currentTrack` starts `null`); the first
-  music starts when `goHome()` calls `audio.setTrack('home')`. Thereafter menus
+- **Music follows state:** `prehome` and `loader` are **silent** for music (`Audio._currentTrack`
+  starts `null`; the loader only plays its one-shot jingle). The first music starts when
+  `enterHome()` (end of the loader) calls `audio.setTrack('home')`. Thereafter menus
   (`home`/`players`/`levels`/`options`/`stats`) play the `home` track; entering a level (`restart()`)
   plays `game` (restarted each attempt); leaving `complete` back to `levels` returns to `home` (see
   `audio.setTrack` calls in `main.js`).
@@ -135,11 +163,26 @@ Velocities are scaled ×1.30 and gravity ×1.69 vs. an earlier "slow" baseline (
 - **Layout:** `TILE = 60`, `GRID_SIZE = 60`, `FLOOR_HEIGHT = TILE*2 = 120`, `FLOOR_Y = 600`,
   `PLAYER_X = 220`, `LOGICAL_WIDTH = 1280`, `LOGICAL_HEIGHT = 720`.
 - **Per-level scroll speed** lives on each `LEVELS` entry (`scrollSpeed`), overriding the default
-  `SCROLL_SPEED = 468`.
+  `SCROLL_SPEED = 468`. All current levels use **630** (was 585; +8%). It's the only pace control:
+  `camera.setSpeed(lvl().scrollSpeed)` → `Camera.update` adds `speed*dt` to the world X.
+- **Per-level obstacle color** (`obstacleBottom` on each `LEVELS` entry): the bottom color of the
+  spike/block vertical gradient (top stays near-black `OBSTACLE_FILL_TOP`). Threaded
+  `main.js render` → `level.render(…, fillBottom)` → `obstacle.render` (`_renderBlock`/`_renderSpike`,
+  default `OBSTACLE_FILL_BOTTOM` if absent); the same color also feeds the cube's **vector fallback**
+  in `Player._renderCube` (the PNG skin is unaffected). `_renderSpikeFloor` keeps its black/ice look.
 - **Audio:** `BPM = 128`, `MUSIC_VOLUME`/`SFX_VOLUME` defaults, and
   `MUSIC_TRACKS = { home: '/home.m4a', game: '/game.mp3' }` — the looped background tracks (drop the
   files in `public/`; menus play `home`, levels play `game` via `audio.setTrack`; if absent, the
-  synth beat plays instead).
+  synth beat plays instead). `SFX_FILES = { 'tag-artie', 'tag-miles', 'death-artie', loader }`
+  (→ `*.MP3`; `loader` = `tag-tutto-fatto.MP3`) — file-based one-shot SFX (player-select tags, the
+  death sound, the fake-loader jingle), preloaded in `Audio.unlock()` and played via
+  `audio.playSfxFile(key)` / `playSfxOnce(key, onEnded)` (no-op until decoded). **Note the uppercase
+  `.MP3`** —
+  the prod CDN is case-sensitive, so `SFX_FILES` paths must match the real filenames in `public/`.
+  Music is **silenced on the `players` screen** so the tags are clearly audible: `main.js`'s
+  `update()` calls `audio.setMusicSilenced(gameState === 'players')` each frame (state-driven, so
+  every enter/exit path is covered and the volume restores automatically). It uses a separate
+  `_musicScreenMul` (0/1) factor — the saved `_musicVol` is never modified.
 
 ⚠️ Don't touch the engine/physics/rendering when only building level data.
 
@@ -168,7 +211,10 @@ Velocities are scaled ×1.30 and gravity ×1.69 vs. an earlier "slow" baseline (
 | `8` | pad — ground-only, cube-only, big auto-bounce |
 | `9` | coin — collectible, **max 5 per level**, always optional |
 
-## 7. Level design rules (target speed 585 — verified geometry)
+## 7. Level design rules (geometry verified at speed 585; levels now run at 630)
+The jump/range numbers below were simulator-verified at **585**; all levels now use
+`scrollSpeed: 630` (+8% feel). The arcs are unchanged (physics isn't tied to scroll speed),
+so the 585-verified rules remain the design baseline — just slightly tighter timing at 630.
 From the simulator-verified headers in `level2.js` / `skyline.js`:
 - Cube jump apex **~2.8 tiles**, horizontal range **~5.2 tiles**.
 - Orb = a fresh mid-air jump; **place orbs at row 7** (touchable on the rising arc).
@@ -210,15 +256,19 @@ From the simulator-verified headers in `level2.js` / `skyline.js`:
      id: '<name>', name: '<Display>', diff: 'Medio',   // Facile | Medio | Difficile
      bg: 'losangeles', floor: 'city',                  // 'neon' | 'city' | 'la' | 'losangeles'
      cube: LA_CUBE, ship: LA_SHIP,                     // a {top,bottom} theme pair from config
-     scrollSpeed: 585, mapKey: '<name>', diffFrac: 0.55,
+     obstacleBottom: '#8a3a12',                        // bottom of the spike/block gradient (top stays near-black); coherent w/ bg
+     scrollSpeed: 630, mapKey: '<name>', diffFrac: 0.55,
      // comingSoon: true,   // OMIT to make the level selectable/playable
    }
    ```
    `mapKey` must match both the `data/` export and the `MAPS` key.
 
 ## 9. Current content
-All 5 levels are playable, `diff: 'Medio'`, `scrollSpeed: 585`, `floor: 'city'`, themes `LA_CUBE/LA_SHIP`.
-Levels 3–5 are **placeholder copies of the `skyline` map** (to be differentiated later).
+All 5 levels are playable, `diff: 'Medio'`, `scrollSpeed: 630`, themes `LA_CUBE/LA_SHIP`. Each level
+sets a per-level `obstacleBottom` (bottom color of the spike/block gradient, coherent with its bg;
+the top stays near-black `OBSTACLE_FILL_TOP`). Carousel order: City · Car Wash · Los Angeles ·
+Boulevard · Metro. Levels other than City/LA are **placeholder copies of the `skyline` map**
+(to be differentiated later).
 
 | # | id | name | mapKey | bg | floor | notes |
 |---|----|------|--------|----|----|-------|
@@ -236,7 +286,13 @@ Levels 3–5 are **placeholder copies of the `skyline` map** (to be differentiat
 - Comments and on-screen text are Italian; keep that style when editing existing files.
 - Draw only in logical coords through `Renderer` / its `ctx`; never assume raw pixel sizes.
 - StarTrail/effects avoid `Math.random()` (deterministic hashing) — keep new effects deterministic if they need to be reproducible.
-- No automated tests: validate gameplay by a static grid walk against §7, then `npm run dev`.
+- **UI hit-testing uses `pointerdown`, not `mousedown`** (mobile-tappable). Don't add a second
+  `mousedown`/`click` UI listener on the canvas or taps will double-fire; don't add `preventDefault`
+  in that handler (it'd fight the nickname `<input>` focus — `Input.js` already prevents default on
+  `touchstart` for the jump). In-game jump lives in `Input.js`, separate from the UI handler.
+- No automated tests: validate gameplay by a static grid walk against §7, then `npm run dev` (test
+  mobile via DevTools device emulation: portrait shows the `#rotate` overlay + freezes; landscape
+  menus are tappable).
 
 ## 11. Maintenance checklist (update THIS file when…)
 - **New/changed level** → update the table in §9 (and §8 if the wiring steps change).

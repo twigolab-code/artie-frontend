@@ -1,4 +1,4 @@
-import { BPM, MUSIC_VOLUME, SFX_VOLUME, MUSIC_TRACKS } from '../config.js';
+import { BPM, MUSIC_VOLUME, SFX_VOLUME, MUSIC_TRACKS, SFX_FILES } from '../config.js';
 
 // =============================================================================
 // Audio — musica di sottofondo + effetti sonori (Web Audio API).
@@ -36,10 +36,22 @@ export class Audio {
     this._currentTrack = null;
     this._musicFileOk = false;
 
+    // SFX da file (chiave logica → AudioBuffer decodificato). Popolati all'unlock
+    // da SFX_FILES; finché un buffer non è pronto, il play di quella chiave è no-op.
+    this._sfxBuffers = {};
+    // One-shot richiesti prima che il buffer sia decodificato: { key → {onEnded, onReady} }.
+    // _loadSfxFile li suona appena il decode finisce (vedi playSfxOnce / loader).
+    this._pendingOnce = {};
+
     // Valori correnti (persistono anche prima dell'unlock).
     this._musicVol = MUSIC_VOLUME;
     this._sfxVol = SFX_VOLUME;
     this._muted = false;
+
+    // Moltiplicatore di "silenzio per schermata" (0 = musica muta, 1 = normale),
+    // indipendente dal volume persistito _musicVol. Usato per azzerare la musica
+    // in certe schermate (es. selezione player) senza toccare l'impostazione utente.
+    this._musicScreenMul = 1;
 
     this.secondsPerBeat = 60 / BPM;
     this._nextBeatTime = 0;
@@ -62,11 +74,15 @@ export class Audio {
     this.master.connect(this.ctx.destination);
     // music e sfx come figli del master, con i propri volumi.
     this.music = this.ctx.createGain();
-    this.music.gain.value = this._musicVol;
+    this.music.gain.value = this._musicVol * this._musicScreenMul;
     this.music.connect(this.master);
     this.sfx = this.ctx.createGain();
     this.sfx.gain.value = this._sfxVol;
     this.sfx.connect(this.master);
+
+    // Alcuni browser creano il contesto 'suspended' anche dentro un gesto: resume
+    // esplicito così i suoni partono subito (es. il jingle del loader).
+    if (this.ctx.state === 'suspended') this.ctx.resume();
 
     this._startTime = this.ctx.currentTime;
     this._nextBeatTime = this.ctx.currentTime + 0.05;
@@ -76,6 +92,35 @@ export class Audio {
     // Prova a caricare i brani da file e instradarli sul nodo `music`. Siamo
     // dentro un gesto utente, quindi play() è consentito dalle policy browser.
     this._initMusicFiles();
+
+    // Precarica gli SFX da file (decodifica in AudioBuffer). L'AudioContext esiste.
+    for (const [key, src] of Object.entries(SFX_FILES)) this._loadSfxFile(key, src);
+  }
+
+  // Scarica e decodifica un SFX da file in un AudioBuffer riutilizzabile. Errori
+  // (file mancante / decode fallito) sono silenziosi: la chiave resta senza buffer
+  // e il relativo playSfxFile() diventa un no-op (nessun crash).
+  _loadSfxFile(key, src) {
+    if (!this.ctx || this._sfxBuffers[key]) return;
+    fetch(src)
+      .then((res) => res.arrayBuffer())
+      .then((data) => this.ctx.decodeAudioData(data))
+      .then((buffer) => {
+        this._sfxBuffers[key] = buffer;
+        // Se qualcuno aveva chiesto un one-shot prima che il buffer fosse pronto
+        // (es. il loader appena cliccato Gioca, nello stesso gesto dell'unlock),
+        // suonalo ora che è decodificato.
+        const pending = this._pendingOnce[key];
+        if (pending) {
+          delete this._pendingOnce[key];
+          this._startOnce(buffer, pending.onEnded);
+          if (pending.onReady) pending.onReady(buffer.duration);
+        }
+      })
+      .catch(() => {
+        // SFX non disponibile: resta muto, nessun errore propagato.
+        delete this._pendingOnce[key];
+      });
   }
 
   // Carica i brani di MUSIC_TRACKS come HTMLAudioElement in loop, collegati al
@@ -125,10 +170,34 @@ export class Audio {
     el.play().catch(() => {});
   }
 
+  // Ferma SUBITO la musica di sottofondo (tutti i brani). Usato alla morte: resta
+  // solo il suono di morte. Il tentativo successivo la riavvia via setTrack(...,
+  // {restart:true}) in restart().
+  stopMusic() {
+    this._currentTrack = null;
+    for (const el of Object.values(this._tracks)) {
+      if (!el.paused) el.pause();
+    }
+  }
+
   // --- Volumi / mute (memorizzati, applicabili anche prima dell'unlock) ------
+  // Applica al nodo `music` il volume effettivo = volume persistito × moltiplicatore
+  // di schermata. Unico punto che scrive `music.gain`, così i due fattori non si
+  // sovrascrivono a vicenda.
+  _applyMusicGain() {
+    if (this.music) this.music.gain.value = this._musicVol * this._musicScreenMul;
+  }
   setMusicVolume(v) {
     this._musicVol = Math.max(0, Math.min(1, v));
-    if (this.music) this.music.gain.value = this._musicVol;
+    this._applyMusicGain();
+  }
+  // Silenzia/ripristina la musica per schermata (es. selezione player) senza
+  // toccare il volume persistito. Idempotente: scrive solo se cambia.
+  setMusicSilenced(b) {
+    const mul = b ? 0 : 1;
+    if (mul === this._musicScreenMul) return;
+    this._musicScreenMul = mul;
+    this._applyMusicGain();
   }
   setSfxVolume(v) {
     this._sfxVol = Math.max(0, Math.min(1, v));
@@ -247,7 +316,51 @@ export class Audio {
     this._tone(1320, 1320, 0.12, 'square', 0.4, 0.07);
   }
   playDeath() {
-    // Scivolata discendente + tono grave.
-    this._tone(400, 80, 0.35, 'sawtooth', 0.5);
+    // Suono di morte da file; se il buffer non è ancora pronto (caricamento lento)
+    // fallback al tono sintetizzato così non resta mai muto.
+    if (!this.playSfxFile('death-artie')) this._tone(400, 80, 0.35, 'sawtooth', 0.5);
+  }
+
+  // Riproduce un SFX da file precaricato (one-shot, instradato su `sfx` → rispetta
+  // volume effetti + mute). Ritorna true se ha suonato, false se l'audio non è
+  // sbloccato o il buffer non è ancora pronto (il chiamante può fare fallback).
+  // Ogni play usa un nuovo BufferSource: tap rapidi si sovrappongono puliti e la
+  // sorgente si auto-conclude.
+  playSfxFile(key) {
+    if (!this.enabled) return false;
+    const buffer = this._sfxBuffers[key];
+    if (!buffer) return false;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(this.sfx);
+    src.start();
+    return true;
+  }
+
+  // Avvia un BufferSource one-shot (instradato su `sfx`), con onEnded opzionale.
+  _startOnce(buffer, onEnded) {
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(this.sfx);
+    if (onEnded) src.onended = onEnded;
+    src.start();
+  }
+
+  // Riproduce un SFX one-shot e ritorna la sua durata in secondi (0 se non ancora
+  // nota); chiama onEnded a fine riproduzione. Se il buffer NON è ancora decodificato
+  // (tipico al primo gesto: unlock + play nello stesso click), registra la richiesta
+  // e la suona appena pronto, notificando la durata via onReady. Ritorna 0 in quel
+  // caso → il chiamante può usare un fallback temporale finché onReady non arriva.
+  // Se l'audio è del tutto disabilitato (niente Web Audio) ritorna 0 e basta.
+  playSfxOnce(key, onEnded, onReady) {
+    if (!this.enabled) return 0;
+    const buffer = this._sfxBuffers[key];
+    if (buffer) {
+      this._startOnce(buffer, onEnded);
+      return buffer.duration;
+    }
+    // Buffer non pronto: suona appena decodificato (vedi _loadSfxFile).
+    this._pendingOnce[key] = { onEnded, onReady };
+    return 0;
   }
 }

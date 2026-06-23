@@ -155,16 +155,32 @@ function themeFor(t) {
   };
 }
 
-// Stato schermate: 'prehome' | 'home' | 'players' | 'levels' | 'playing'.
+// Stato schermate: 'prehome' | 'loader' | 'home' | 'players' | 'levels' | 'playing'.
 // 'prehome' è la schermata d'ingresso (nickname + Gioca, senza musica): si parte
-// da qui e si passa a 'home' premendo Gioca, dove parte la musica.
+// da qui. Premendo Gioca si passa a 'loader' (fake loader col jingle
+// 'tag-tutto-fatto') e, a fine suono, a 'home' dove parte la musica.
 let gameState = 'prehome';
 
 // Nickname del giocatore (richiesto nella pre-home, persistito in localStorage).
 let nickname = getNickname();
 
+// Fake loader (prehome → home): l'anello si riempie nel tempo del jingle e, a fine
+// suono, si apre la home. loaderDone viene impostato dall'onended reale del suono;
+// loaderDur (durata del buffer, o fallback) guida solo l'animazione + il timeout.
+let loaderT = 0;
+let loaderDur = 1.6;
+let loaderDone = false;
+let loaderPending = false; // true mentre attendiamo il decode del jingle (onReady)
+const LOADER_FALLBACK = 1.6; // durata se non c'è audio/buffer (così non si blocca)
+const LOADER_PENDING_CAP = 6.0; // tetto di sicurezza se il decode tardasse troppo
+
 // Pausa durante il gioco: ferma l'update (la fisica), il render continua.
 let isPaused = false;
+
+// Blocco orientamento: true quando siamo in verticale su un dispositivo touch.
+// Mentre è true il mondo è congelato (update early-return) e l'overlay "ruota il
+// telefono" copre lo schermo. Inizializzato/aggiornato da onOrientationChange().
+let orientationBlocked = false;
 
 // Livello corrente (ricreato in startLevel) e relativi dati.
 let level = new Level(MAPS[lvl().mapKey]);
@@ -201,6 +217,18 @@ function unlockAudioOnce() {
   for (const ev of UNLOCK_EVENTS) window.removeEventListener(ev, unlockAudioOnce);
 }
 for (const ev of UNLOCK_EVENTS) window.addEventListener(ev, unlockAudioOnce);
+
+// --- Forza landscape su mobile ---------------------------------------------
+// In verticale il layout 16:9 si riduce a una striscia: su dispositivi touch
+// blocchiamo il gioco e mostriamo l'overlay "ruota il telefono". Usiamo
+// matchMedia('(orientation: portrait)') (robusto: non si fa ingannare dalla
+// tastiera mobile come farebbe innerW/innerH) gated da '(pointer: coarse)' così
+// un desktop con finestra stretta/alta NON viene bloccato.
+const mqPortrait = window.matchMedia('(orientation: portrait)');
+const mqCoarse = window.matchMedia('(pointer: coarse)');
+function isOrientationBlocked() {
+  return mqCoarse.matches && mqPortrait.matches;
+}
 
 // --- Avvio livello selezionato ---------------------------------------------
 function startLevel() {
@@ -240,6 +268,14 @@ function restart() {
   audio.setTrack('game', { restart: true });
 }
 
+// Suono "tag" del player selezionato (schermata Player). Mappa l'id del player
+// (es. 'artie'/'miles') alla chiave SFX 'tag-<id>'. No-op se non esiste un file
+// per quell'id (playSfxFile ignora chiavi senza buffer).
+function playTag(index) {
+  const p = PLAYERS[index];
+  if (p) audio.playSfxFile('tag-' + p.id);
+}
+
 // --- Input delle schermate (home / players / levels) ------------------------
 window.addEventListener('keydown', (e) => {
   if (gameState === 'prehome') {
@@ -263,9 +299,13 @@ window.addEventListener('keydown', (e) => {
     else if (e.code === 'KeyM') toggleMute();
     else if (e.code === 'Escape' || e.code === 'Enter') gameState = 'home';
   } else if (gameState === 'players') {
-    if (e.code === 'ArrowLeft') playerIndex = (playerIndex + PLAYERS.length - 1) % PLAYERS.length;
-    else if (e.code === 'ArrowRight') playerIndex = (playerIndex + 1) % PLAYERS.length;
-    else if (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') gameState = 'home';
+    if (e.code === 'ArrowLeft') {
+      playerIndex = (playerIndex + PLAYERS.length - 1) % PLAYERS.length;
+      playTag(playerIndex); // tag del player ora selezionato
+    } else if (e.code === 'ArrowRight') {
+      playerIndex = (playerIndex + 1) % PLAYERS.length;
+      playTag(playerIndex);
+    } else if (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') gameState = 'home';
   } else if (gameState === 'levels') {
     if (e.code === 'ArrowLeft') levelIndex = (levelIndex + LEVELS.length - 1) % LEVELS.length;
     else if (e.code === 'ArrowRight') levelIndex = (levelIndex + 1) % LEVELS.length;
@@ -289,8 +329,11 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-// Click: bottoni Home, frecce di navigazione, conferma.
-canvas.addEventListener('mousedown', (e) => {
+// Pointer (mouse + touch + penna): bottoni Home, frecce di navigazione, conferma.
+// pointerdown unifica mouse/touch/penna e scatta subito sul tocco; rimpiazza
+// mousedown (NON si aggiunge) così il mousedown sintetico post-touch non fa
+// partire l'handler due volte. In gioco il salto resta gestito da Input.js.
+canvas.addEventListener('pointerdown', (e) => {
   const p = toLogical(e);
   if (gameState === 'prehome') {
     // Solo il bottone Gioca (abilitato se c'è un nickname). Il click sul campo è
@@ -324,6 +367,7 @@ canvas.addEventListener('mousedown', (e) => {
     // altrimenti lo seleziona. Click altrove = conferma.
     const hit = playerSlots().find((s) => pointInRect(p, s));
     if (hit) {
+      playTag(hit.i); // tag del player toccato (risuona anche se già selezionato)
       if (hit.i === playerIndex) gameState = 'home';
       else playerIndex = hit.i;
     } else {
@@ -438,9 +482,28 @@ function init() {
 }
 
 function update(dt) {
+  // Portrait su touch: mondo (e beat) congelati; il player non muore dietro
+  // l'overlay. Il render() continua a disegnare sotto.
+  if (orientationBlocked) return;
+
   audio.update(); // schedula i beat (anche durante la morte)
 
+  // Musica muta nella schermata selezione player (così si sentono bene i tag).
+  // Pilotata dallo stato corrente ogni frame: copre ogni via di entrata/uscita e
+  // ripristina da solo il volume uscendo. Non tocca il volume persistito.
+  audio.setMusicSilenced(gameState === 'players');
+
   menuTime += dt; // tempo per le animazioni delle schermate (cubo della Home)
+
+  if (gameState === 'loader') {
+    loaderT += dt;
+    // Mentre attendiamo il decode del jingle non scadere sulla durata provvisoria:
+    // usa un tetto di sicurezza generoso (onReady riparte il timer con la durata
+    // reale appena il suono parte). Il +0.05 evita un taglio netto dell'anello.
+    const cap = loaderPending ? LOADER_PENDING_CAP : loaderDur + 0.05;
+    if (loaderDone || loaderT >= cap) enterHome();
+    return;
+  }
 
   if (gameState !== 'playing' || isPaused) return; // schermate o pausa: gioco fermo
 
@@ -450,6 +513,7 @@ function update(dt) {
   if (!player.alive) {
     // Death SFX una sola volta, nel frame della transizione vivo->morto.
     if (prevAlive) {
+      audio.stopMusic(); // ferma subito la musica: si sente solo il suono di morte
       audio.playDeath();
       // Tentativo concluso con la morte: accumula nelle stats persistenti.
       commitRunStats(lvl().id, runJumps, bestRunPct);
@@ -734,6 +798,7 @@ function render(alpha) {
   }
 
   if (gameState === 'prehome') return drawPreHome();
+  if (gameState === 'loader') return drawLoader();
   if (gameState === 'home') return drawHome();
   if (gameState === 'players') return drawPlayers();
   if (gameState === 'levels') return drawLevels();
@@ -754,14 +819,16 @@ function render(alpha) {
   rocketField.render(renderer, camX, themeT, beatPulse);
 
   drawFloor(camX);
-  level.render(renderer, camX, elapsed); // time -> pulsazione portali
+  // Colore "in basso" del gradiente di ostacoli/cubo, coerente col livello (top nero).
+  const fillBottom = lvl().obstacleBottom;
+  level.render(renderer, camX, elapsed, fillBottom); // time -> pulsazione portali
 
   portalFx.render(renderer, camX); // onda d'urto + scintille del passaggio
   // Il player resta pinnato a PLAYER_X: lo disegno con la camera NON interpolata
   // (player.x = camera.x + PLAYER_X), così non vibra mentre il mondo scorre liscio.
   trail.render(renderer, camera.x); // scia ancorata al player
   starTrail.render(renderer, camera.x); // stelle ancorate al player
-  if (player.alive) player.render(renderer, camera.x);
+  if (player.alive) player.render(renderer, camera.x, fillBottom);
   particles.render(renderer, camX);
 
   // Velo + vignette colorata SOPRA al gameplay quando il razzo è attivo.
@@ -928,7 +995,7 @@ function button(rect, label, color = UI.green) {
 }
 
 // Freccia triangolare di navigazione (dir: -1 sinistra, +1 destra), con outline.
-function arrow(rect, dir) {
+function arrow(rect, dir, color = UI.green) {
   const ctx = renderer.ctx;
   const cx = rect.x + rect.w / 2;
   const cy = rect.y + rect.h / 2;
@@ -946,9 +1013,11 @@ function arrow(rect, dir) {
     ctx.lineTo(cx - hw, cy + hh);
   }
   ctx.closePath();
-  ctx.fillStyle = UI.green;
+  ctx.fillStyle = color;
   ctx.fill();
-  ctx.lineWidth = 6;
+  // Outline proporzionale alla larghezza: la freccia piccola (indietro) non ha un
+  // bordo sproporzionato; quella laterale (w=110) resta praticamente come prima.
+  ctx.lineWidth = Math.max(3, rect.w * 0.06);
   ctx.lineJoin = 'round';
   ctx.strokeStyle = UI.outline;
   ctx.stroke();
@@ -995,7 +1064,7 @@ function pointInPauseBtn(p) {
   const c = pauseBtnCircle();
   const dx = p.x - c.cx;
   const dy = p.y - c.cy;
-  return dx * dx + dy * dy <= (c.r + 8) * (c.r + 8); // +8 tolleranza tocco
+  return dx * dx + dy * dy <= (c.r + 16) * (c.r + 16); // +16: target tocco ~44px CSS (anello invariato)
 }
 // Disegna il tastino pausa: anello sottile + due barrette verticali, discreto.
 function drawPauseButton() {
@@ -1133,13 +1202,116 @@ function drawHomeCube() {
   ctx.restore();
 }
 
-// Lascia la pre-home: nasconde l'input, avvia la musica della Home e passa allo
-// stato 'home'. L'AudioContext è già sbloccato dal click/tasto su Gioca.
+// Lascia la pre-home: nasconde l'input, avvia il jingle del fake loader ed entra
+// nello stato 'loader'. La home (e la sua musica) si aprono a fine suono, via
+// update(). L'AudioContext è già sbloccato dal click/tasto su Gioca.
 function goHome() {
   nickInput.style.display = 'none';
   nickInput.blur();
+  // Assicura l'AudioContext sbloccato PRIMA del play: il listener globale di unlock
+  // è sul window (bubble), quindi gira DOPO questo handler sul canvas (target).
+  // unlock() è idempotente: se già attivo non rifà nulla (al più resume).
+  audio.unlock();
+  loaderT = 0;
+  loaderDone = false;
+  loaderDur = LOADER_FALLBACK; // provvisorio finché non sappiamo la durata reale
+  // playSfxOnce suona subito se il buffer è pronto (ritorna la durata reale) oppure,
+  // se è ancora in decodifica (tipico: unlock + Gioca nello stesso click), lo suona
+  // appena pronto e ci comunica la durata via onReady. onEnded chiude il loader sul
+  // termine reale del suono; il timeout su loaderDur copre il caso audio assente.
+  const d = audio.playSfxOnce(
+    'loader',
+    () => {
+      loaderDone = true;
+    },
+    (dur) => {
+      // Buffer decodificato dopo il click: riallinea la durata e riparti l'anello da
+      // capo, così si riempie esattamente sul suono che parte ORA.
+      loaderDur = dur;
+      loaderT = 0;
+      loaderPending = false;
+    }
+  );
+  if (d > 0) {
+    loaderDur = d; // buffer già pronto: durata reale, suono già partito
+    loaderPending = false;
+  } else {
+    // d === 0: o l'audio è abilitato e il buffer sta decodificando (→ onReady
+    // suonerà tra poco: aspettiamo col tetto di sicurezza), oppure non c'è audio
+    // del tutto (→ fallback breve, la home si apre comunque).
+    loaderPending = audio.enabled;
+  }
+  gameState = 'loader';
+}
+
+// Passaggio effettivo alla home: avvia la musica dei menu e cambia stato.
+function enterHome() {
   audio.setTrack('home');
   gameState = 'home';
+}
+
+// Fake loader (prehome → home): anello circolare che si riempie nel tempo del
+// jingle, col cubo del player che ruota al centro e il testo "Mi chiamano <nick>".
+function drawLoader() {
+  const ctx = renderer.ctx;
+  const cx = LOGICAL_WIDTH / 2;
+  const cy = LOGICAL_HEIGHT / 2 + 40;
+
+  // Sfondo coerente con la pre-home (stessa immagine + vela scura).
+  if (BG2_IMG.ready) drawCover(BG2_IMG);
+  else screenBackdrop();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(renderer.extLeft, renderer.extTop, renderer.extRight - renderer.extLeft, renderer.extBottom - renderer.extTop);
+
+  // Logo in alto (come nella pre-home / home).
+  if (LOGO_IMG.ready) {
+    const w = LOGICAL_WIDTH * 0.4;
+    const ratio = LOGO_IMG.img.naturalWidth / LOGO_IMG.img.naturalHeight;
+    const h = w / ratio;
+    ctx.drawImage(LOGO_IMG.img, (LOGICAL_WIDTH - w) / 2, 60, w, h);
+  } else {
+    text('OG DASH', cx, 150, 64);
+  }
+
+  const p = Math.max(0, Math.min(1, loaderT / loaderDur));
+  const R = 110;
+
+  // Anello di base (traccia tenue).
+  ctx.save();
+  ctx.lineWidth = 14;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Arco di progresso (giallo neon, da -90° in senso orario).
+  ctx.strokeStyle = UI.yellow;
+  ctx.shadowColor = UI.yellow;
+  ctx.shadowBlur = 18;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  // Cubo del player che ruota al centro.
+  const skin = getSkin(ply().skin);
+  const size = 84;
+  const angle = menuTime * Math.PI * 1.5;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+  if (skin.ready) {
+    ctx.drawImage(skin.img, -size / 2, -size / 2, size, size);
+  } else {
+    ctx.fillStyle = UI.green;
+    ctx.fillRect(-size / 2, -size / 2, size, size);
+  }
+  ctx.restore();
+
+  // Percentuale sotto l'anello + testo personalizzato col nickname.
+  text(Math.round(p * 100) + '%', cx, cy + R + 50, 34, UI.yellow);
+  text('Mi chiamano ' + (nickname || 'tu') + '...', cx, cy + R + 96, 28);
 }
 
 // Schermata d'ingresso: logo + card con campo nickname e bottone Gioca. Nessuna
@@ -1149,6 +1321,12 @@ function goHome() {
 function drawPreHome() {
   const ctx = renderer.ctx;
   const cx = LOGICAL_WIDTH / 2;
+  // In portrait l'overlay copre tutto: nascondo l'<input> (niente tastiera/flicker
+  // dietro l'overlay) e salto il disegno della card.
+  if (orientationBlocked) {
+    nickInput.style.display = 'none';
+    return;
+  }
   if (BG2_IMG.ready) drawCover(BG2_IMG);
   else screenBackdrop();
   // Vela scura extra per dare risalto alla card.
@@ -1317,7 +1495,7 @@ function drawLevels() {
   dots(LEVELS.length, levelIndex, LOGICAL_WIDTH / 2, py + ph + 46);
 
   // Freccia "indietro" in alto a sinistra.
-  arrow(backArrowRect(), -1);
+  arrow(backArrowRect(), -1, UI.yellow);
 
   const hint = L.comingSoon
     ? 'PROSSIMAMENTE   •   ESC INDIETRO'
@@ -1413,7 +1591,7 @@ function drawOptions() {
   button(r.back, 'INDIETRO', '#8a3ff0');
 
   // Freccia "indietro" in alto a sinistra (coerente con le altre schermate).
-  arrow(backArrowRect(), -1);
+  arrow(backArrowRect(), -1, UI.yellow);
 
   text('ESC = INDIETRO', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 36, 20, 'rgba(255,255,255,0.9)');
 }
@@ -1421,7 +1599,7 @@ function drawOptions() {
 // Rettangolo cliccabile della freccia "indietro" (in alto a sinistra), condiviso
 // tra le schermate di menu (players/levels/options/stats).
 function backArrowRect() {
-  return { x: 40, y: 40, w: 110, h: 96 };
+  return { x: 40, y: 40, w: 70, h: 58 };
 }
 // Alias storico usato da STATS.
 function statsBackRect() {
@@ -1434,7 +1612,7 @@ function drawStats() {
   screenBackdrop();
 
   // Freccia di ritorno in alto a sinistra.
-  arrow(statsBackRect(), -1);
+  arrow(statsBackRect(), -1, UI.yellow);
 
   // Titolo.
   text('STATS', LOGICAL_WIDTH / 2, 110, 60, UI.yellow);
@@ -1546,7 +1724,7 @@ function drawPlayers() {
   }
 
   // Freccia "indietro" in alto a sinistra.
-  arrow(backArrowRect(), -1);
+  arrow(backArrowRect(), -1, UI.yellow);
 
   text('←  →  / CLICK PER SCEGLIERE   •   SPAZIO PER CONFERMARE', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 50, 22, 'rgba(255,255,255,0.9)');
 }
@@ -1967,6 +2145,24 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y, x + w, y, rr);
   ctx.closePath();
 }
+
+// --- Wiring orientamento: overlay "ruota il telefono" + freeze ---------------
+const rotateEl = document.getElementById('rotate');
+function onOrientationChange() {
+  const blocked = isOrientationBlocked();
+  // Entrando in portrait durante il gioco: congelo in pausa "vera" così, tornando
+  // in orizzontale, l'utente riparte dall'overlay di pausa e non da una morte.
+  if (blocked && !orientationBlocked && gameState === 'playing' && !isPaused) {
+    isPaused = true;
+  }
+  orientationBlocked = blocked;
+  if (rotateEl) rotateEl.style.display = blocked ? 'flex' : 'none';
+  if (gameState === 'prehome') positionNickInput(); // riallinea l'input al ritorno landscape
+  input.consumePress(); // scarta eventuali edge accumulati durante il blocco
+}
+mqPortrait.addEventListener('change', onOrientationChange);
+mqCoarse.addEventListener('change', onOrientationChange);
+onOrientationChange(); // stato iniziale: se aperto in portrait, overlay subito visibile
 
 init();
 const loop = new GameLoop(update, render);
