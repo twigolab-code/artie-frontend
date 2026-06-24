@@ -82,6 +82,48 @@ function uiFont(spec) {
   return fontState.ready ? `${spec} ${UI_FONT}` : `${spec} system-ui, sans-serif`;
 }
 
+// --- Scala UI mobile --------------------------------------------------------
+// Su mobile (pointer "coarse") la scena 1280×720 viene rimpicciolita per starci
+// tutta: la UI risulta minuscola. uiScale() ingrandisce SOLO la UI (non lo sfondo)
+// attorno al centro logico, di più quanto più lo schermo è piccolo. Su desktop
+// (pointer fine) ritorna esattamente 1 → nessun cambiamento.
+const UI_SCALE_PIVOT = 0.62; // fit-scale sotto cui la UI inizia a ingrandirsi
+const UI_SCALE_MAX = 1.35; // ingrandimento massimo
+function uiScale() {
+  if (!mqCoarse.matches) return 1; // desktop / pointer fine: invariato
+  const fit = Math.min(window.innerWidth / LOGICAL_WIDTH, window.innerHeight / LOGICAL_HEIGHT);
+  if (!(fit > 0)) return 1;
+  return Math.max(1, Math.min(UI_SCALE_MAX, UI_SCALE_PIVOT / fit));
+}
+// Applica/rimuove la scala-attorno-al-centro al context (per il blocco UI di una
+// schermata, DOPO aver disegnato lo sfondo che deve restare a piena vista).
+function pushUiScale() {
+  const s = uiScale();
+  const ctx = renderer.ctx;
+  ctx.save();
+  if (s !== 1) {
+    const cx = LOGICAL_WIDTH / 2;
+    const cy = LOGICAL_HEIGHT / 2;
+    ctx.translate(cx, cy);
+    ctx.scale(s, s);
+    ctx.translate(-cx, -cy);
+  }
+  return s;
+}
+function popUiScale() {
+  renderer.ctx.restore();
+}
+// Converte un punto logico (da toLogical) nello spazio UI scalato-attorno-al-centro,
+// per fare hit-test coerente col disegno quando uiScale() != 1 (mobile). Identità su
+// desktop. NB: NON usare per l'HUD/tasto pausa, ancorati alla safe-area (non scalati).
+function unscalePoint(p) {
+  const s = uiScale();
+  if (s === 1) return p;
+  const cx = LOGICAL_WIDTH / 2;
+  const cy = LOGICAL_HEIGHT / 2;
+  return { x: cx + (p.x - cx) / s, y: cy + (p.y - cy) / s };
+}
+
 // Mappe disponibili, indicizzate per mapKey del livello.
 // skyline = City · skyline2 = Los Angeles · metro2/carwash/boulevard = nuovi
 // (per ora duplicati di skyline, da differenziare).
@@ -173,6 +215,14 @@ let loaderDone = false;
 let loaderPending = false; // true mentre attendiamo il decode del jingle (onReady)
 const LOADER_FALLBACK = 1.6; // durata se non c'è audio/buffer (così non si blocca)
 const LOADER_PENDING_CAP = 6.0; // tetto di sicurezza se il decode tardasse troppo
+
+// --- Home: composizione "cielo procedurale + pavimento + cubo" -------------
+// La home usa lo STESSO schema dei livelli (cielo sopra FLOOR_Y, pavimento sotto
+// FLOOR_Y, cubo appoggiato a FLOOR_Y) così cubo e pavimento combaciano SEMPRE a
+// qualsiasi risoluzione/aspect ratio. Niente più drawCover(bg-home.webp), che
+// scalava la "linea di terra" disegnata nell'immagine fuori sincrono dal cubo.
+const HOME_SCROLL = 90;                                  // px/s: scorrimento lento del pavimento (e parallasse cielo)
+const HOME_SKY = { top: '#7a1f14', bottom: '#cc2418' };  // cielo rosso (vicino a bg-home.webp), coerente coi mattoni City
 
 // Pausa durante il gioco: ferma l'update (la fisica), il render continua.
 let isPaused = false;
@@ -335,37 +385,41 @@ window.addEventListener('keydown', (e) => {
 // partire l'handler due volte. In gioco il salto resta gestito da Input.js.
 canvas.addEventListener('pointerdown', (e) => {
   const p = toLogical(e);
+  // Punto nello spazio UI (scalato-attorno-al-centro su mobile): per i menu e
+  // l'overlay di pausa, che vengono disegnati con uiScale. Il tasto pausa in gioco
+  // resta sul punto RAW `p` (è ancorato alla safe-area, non scalato).
+  const ps = unscalePoint(p);
   if (gameState === 'prehome') {
     // Solo il bottone Gioca (abilitato se c'è un nickname). Il click sul campo è
     // gestito dall'<input> HTML sovrapposto, non dal canvas.
-    if (nickname.length && pointInRect(p, preHomeRects().play)) goHome();
+    if (nickname.length && pointInRect(ps, preHomeRects().play)) goHome();
     return;
   }
   if (gameState === 'home') {
-    if (pointInRect(p, homeBtns().start)) gameState = 'levels';
-    else if (pointInRect(p, homeBtns().player)) gameState = 'players';
-    else if (pointInRect(p, homeBtns().options)) gameState = 'options';
-    else if (pointInRect(p, homeBtns().stats)) gameState = 'stats';
+    if (pointInRect(ps, homeBtns().start)) gameState = 'levels';
+    else if (pointInRect(ps, homeBtns().player)) gameState = 'players';
+    else if (pointInRect(ps, homeBtns().options)) gameState = 'options';
+    else if (pointInRect(ps, homeBtns().stats)) gameState = 'stats';
   } else if (gameState === 'stats') {
     gameState = 'home'; // click ovunque (inclusa la freccia) torna alla Home
   } else if (gameState === 'options') {
     const r = optionRects();
-    if (pointInRect(p, backArrowRect())) gameState = 'home';
-    else if (pointInRect(p, r.musicMinus)) changeMusicVol(-1);
-    else if (pointInRect(p, r.musicPlus)) changeMusicVol(+1);
-    else if (pointInRect(p, r.sfxMinus)) changeSfxVol(-1);
-    else if (pointInRect(p, r.sfxPlus)) changeSfxVol(+1);
-    else if (pointInRect(p, r.mute)) toggleMute();
-    else if (pointInRect(p, r.back)) gameState = 'home';
+    if (pointInRect(ps, backArrowRect())) gameState = 'home';
+    else if (pointInRect(ps, r.musicMinus)) changeMusicVol(-1);
+    else if (pointInRect(ps, r.musicPlus)) changeMusicVol(+1);
+    else if (pointInRect(ps, r.sfxMinus)) changeSfxVol(-1);
+    else if (pointInRect(ps, r.sfxPlus)) changeSfxVol(+1);
+    else if (pointInRect(ps, r.mute)) toggleMute();
+    else if (pointInRect(ps, r.back)) gameState = 'home';
   } else if (gameState === 'players') {
     // Freccia "indietro" in alto a sinistra → Home (ha priorità).
-    if (pointInRect(p, backArrowRect())) {
+    if (pointInRect(ps, backArrowRect())) {
       gameState = 'home';
       return;
     }
     // Click su un cubo: se è già selezionato, conferma (torna a Home);
     // altrimenti lo seleziona. Click altrove = conferma.
-    const hit = playerSlots().find((s) => pointInRect(p, s));
+    const hit = playerSlots().find((s) => pointInRect(ps, s));
     if (hit) {
       playTag(hit.i); // tag del player toccato (risuona anche se già selezionato)
       if (hit.i === playerIndex) gameState = 'home';
@@ -375,13 +429,13 @@ canvas.addEventListener('pointerdown', (e) => {
     }
   } else if (gameState === 'levels') {
     // Freccia "indietro" in alto a sinistra → Home (ha priorità sul "click = gioca").
-    if (pointInRect(p, backArrowRect())) {
+    if (pointInRect(ps, backArrowRect())) {
       gameState = 'home';
       return;
     }
     const ar = arrowRects();
-    if (pointInRect(p, ar.left)) levelIndex = (levelIndex + LEVELS.length - 1) % LEVELS.length;
-    else if (pointInRect(p, ar.right)) levelIndex = (levelIndex + 1) % LEVELS.length;
+    if (pointInRect(ps, ar.left)) levelIndex = (levelIndex + LEVELS.length - 1) % LEVELS.length;
+    else if (pointInRect(ps, ar.right)) levelIndex = (levelIndex + 1) % LEVELS.length;
     else startLevel(); // click altrove = gioca
   } else if (gameState === 'complete') {
     input.consumePress(); // scarta l'edge del click così non parte un salto
@@ -389,21 +443,21 @@ canvas.addEventListener('pointerdown', (e) => {
   } else if (gameState === 'playing') {
     if (!isPaused) {
       // Click sul tastino pausa (cerchio in alto a destra) → mette in pausa.
-      // Scarto l'edge così questo click non viene letto come salto.
+      // Scarto l'edge così questo click non viene letto come salto. Usa `p` RAW.
       if (pointInPauseBtn(p)) {
         isPaused = true;
         input.consumePress();
       }
     } else {
-      // Overlay di pausa: RIPRENDI / RICOMINCIA / ESCI.
+      // Overlay di pausa: RIPRENDI / RICOMINCIA / ESCI (UI scalata → usa `ps`).
       const r = pauseOverlayRects();
-      if (pointInRect(p, r.resume)) {
+      if (pointInRect(ps, r.resume)) {
         isPaused = false;
         input.consumePress();
-      } else if (pointInRect(p, r.restart)) {
+      } else if (pointInRect(ps, r.restart)) {
         startLevel(); // azzera isPaused via restart()
         input.consumePress();
-      } else if (pointInRect(p, r.exit)) {
+      } else if (pointInRect(ps, r.exit)) {
         isPaused = false;
         gameState = 'levels';
         audio.setTrack('home');
@@ -429,6 +483,7 @@ nickInput.setAttribute('aria-label', 'Il tuo nickname');
 Object.assign(nickInput.style, {
   position: 'absolute',
   display: 'none',
+  zIndex: '5', // sopra il canvas, sotto #installHint (9) e #rotate (10)
   boxSizing: 'border-box',
   margin: '0',
   padding: '0 14px',
@@ -451,25 +506,61 @@ nickInput.addEventListener('input', () => {
 nickInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && nickname.length) goHome();
 });
+// Al focus (apertura tastiera mobile): riposiziona dopo l'animazione e porta in
+// vista, così il campo resta allineato anche con la tastiera aperta.
+nickInput.addEventListener('focus', () => {
+  setTimeout(() => {
+    positionNickInput();
+    try {
+      nickInput.scrollIntoView({ block: 'center' });
+    } catch {
+      // scrollIntoView non disponibile: nessun problema, l'input resta a posto.
+    }
+  }, 250);
+});
 
 // Posiziona/dimensiona l'<input> sopra il rettangolo logico del campo, con la
-// stessa matematica (inversa) del letterbox usata in toLogical.
+// stessa matematica (inversa) del letterbox usata in toLogical. Tiene conto della
+// scala UI mobile (uiScale, attorno al centro logico) e dell'offset della
+// visualViewport quando la tastiera mobile è aperta.
 function positionNickInput() {
   const r = preHomeRects().field;
+  // Applica la stessa scala-attorno-al-centro usata per disegnare la UI mobile,
+  // così l'<input> resta sopra la cornice del campo anche quando è ingrandita.
+  const s = uiScale();
+  const cx = LOGICAL_WIDTH / 2;
+  const cy = LOGICAL_HEIGHT / 2;
+  const fx = cx + (r.x - cx) * s;
+  const fy = cy + (r.y - cy) * s;
+  const fw = r.w * s;
+  const fh = r.h * s;
+
   const rect = canvas.getBoundingClientRect();
   const scale = Math.min(rect.width / LOGICAL_WIDTH, rect.height / LOGICAL_HEIGHT);
   const offX = (rect.width - LOGICAL_WIDTH * scale) / 2;
   const offY = (rect.height - LOGICAL_HEIGHT * scale) / 2;
-  nickInput.style.left = rect.left + offX + r.x * scale + 'px';
-  nickInput.style.top = rect.top + offY + r.y * scale + 'px';
-  nickInput.style.width = r.w * scale + 'px';
-  nickInput.style.height = r.h * scale + 'px';
-  nickInput.style.fontSize = 30 * scale + 'px';
+  // Offset della visualViewport (tastiera mobile: l'area visibile si sposta/riduce).
+  const vvX = window.visualViewport ? window.visualViewport.offsetLeft : 0;
+  const vvY = window.visualViewport ? window.visualViewport.offsetTop : 0;
+  nickInput.style.left = rect.left + offX + fx * scale + vvX + 'px';
+  nickInput.style.top = rect.top + offY + fy * scale + vvY + 'px';
+  nickInput.style.width = fw * scale + 'px';
+  nickInput.style.height = fh * scale + 'px';
+  // Font ≥16px: sotto i 16px iOS zooma in automatico al focus (rompe il layout).
+  nickInput.style.fontSize = Math.max(16, 30 * scale * s) + 'px';
 }
 // Mantiene l'allineamento al resize finché siamo in pre-home.
 window.addEventListener('resize', () => {
   if (gameState === 'prehome') positionNickInput();
 });
+// La tastiera mobile cambia la visualViewport senza un 'resize' classico: riallinea.
+if (window.visualViewport) {
+  const onVV = () => {
+    if (gameState === 'prehome') positionNickInput();
+  };
+  window.visualViewport.addEventListener('resize', onVV);
+  window.visualViewport.addEventListener('scroll', onVV);
+}
 
 function init() {
   player.setSkin(getSkin(ply().skin));
@@ -1055,19 +1146,18 @@ function dots(n, active, cx, y) {
 }
 
 // --- Pausa (tastino in gioco + overlay) ------------------------------------
-// Tastino pausa: cerchio translucido in alto a destra (stile reference).
+// Tastino pausa: cerchio translucido in alto a destra. Posizione/raggio dal
+// layout HUD condiviso (topHudLayout): ancorato a safeRight (dentro l'area sicura,
+// non più sotto al notch) e allineato sulla riga di barra/monete/tentativi.
 function pauseBtnCircle() {
-  // Il più a destra possibile: ancorato al bordo REALE del canvas (extRight,
-  // che include la banda letterbox sugli schermi larghi), anello a ~12px dal
-  // bordo, allineato verticalmente alla barra del percorso (centro y=33).
-  const r = 28;
-  return { cx: renderer.extRight - 12 - r, cy: 33, r };
+  return topHudLayout().pause;
 }
 function pointInPauseBtn(p) {
   const c = pauseBtnCircle();
   const dx = p.x - c.cx;
   const dy = p.y - c.cy;
-  return dx * dx + dy * dy <= (c.r + 16) * (c.r + 16); // +16: target tocco ~44px CSS (anello invariato)
+  const tol = c.r + 16; // +16: target tocco ~44px CSS (anello invariato)
+  return dx * dx + dy * dy <= tol * tol;
 }
 // Disegna il tastino pausa: anello sottile + due barrette verticali, discreto.
 function drawPauseButton() {
@@ -1108,11 +1198,13 @@ function drawPauseOverlay() {
   ctx.fillRect(renderer.extLeft, renderer.extTop, renderer.extRight - renderer.extLeft, renderer.extBottom - renderer.extTop);
   ctx.restore();
 
+  pushUiScale(); // titolo/bottoni ingranditi su mobile (velo a piena vista)
   text('PAUSA', LOGICAL_WIDTH / 2, 220, 64, UI.yellow);
   const r = pauseOverlayRects();
   button(r.resume, 'RIPRENDI', UI.green);
   button(r.restart, 'RICOMINCIA', UI.blue);
   button(r.exit, 'ESCI', '#8a3ff0');
+  popUiScale();
 }
 
 // Sfondo di anteprima comune alle schermate (sfondo del livello evidenziato).
@@ -1144,9 +1236,8 @@ function drawCover(handle) {
 // di ciclo (niente fisica). Usa la skin del player selezionato (+ scia rossa).
 function drawHomeCube() {
   const ctx = renderer.ctx;
-  const size = 210; // cubo grande (scala di riferimento, stile GD)
-  const groundLine = LOGICAL_HEIGHT * 0.85; // linea di terra (combacia con la linea bianca)
-  const groundY = groundLine - size; // bordo superiore del cubo appoggiato a terra
+  const size = 150; // cubo grande decorativo (ridotto: a terra appoggia su FLOOR_Y)
+  const groundY = FLOOR_Y - size; // bordo superiore: il cubo poggia ESATTAMENTE su FLOOR_Y (=600)
   const T = 2.0; // durata del ciclo (s) — cubo più veloce
   const jumpAt = 0.4; // frazione del ciclo in cui parte il salto (un filo prima)
   const startX = -120;
@@ -1266,6 +1357,8 @@ function drawLoader() {
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.fillRect(renderer.extLeft, renderer.extTop, renderer.extRight - renderer.extLeft, renderer.extBottom - renderer.extTop);
 
+  pushUiScale(); // anello/cubo/testo ingranditi su mobile (sfondo+vela a piena vista)
+
   // Logo in alto (come nella pre-home / home).
   if (LOGO_IMG.ready) {
     const w = LOGICAL_WIDTH * 0.4;
@@ -1315,6 +1408,8 @@ function drawLoader() {
   // Percentuale sotto l'anello + testo personalizzato col nickname.
   text(Math.round(p * 100) + '%', cx, cy + R + 50, 34, UI.yellow);
   text('Mi chiamano ' + (nickname || 'tu') + '...', cx, cy + R + 96, 28);
+
+  popUiScale();
 }
 
 // Schermata d'ingresso: logo + card con campo nickname e bottone Gioca. Nessuna
@@ -1335,6 +1430,8 @@ function drawPreHome() {
   // Vela scura extra per dare risalto alla card.
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
   ctx.fillRect(renderer.extLeft, renderer.extTop, renderer.extRight - renderer.extLeft, renderer.extBottom - renderer.extTop);
+
+  pushUiScale(); // card/logo/bottone ingranditi su mobile (sfondo+vela a piena vista)
 
   // Logo in alto (come in Home).
   if (LOGO_IMG.ready) {
@@ -1372,15 +1469,29 @@ function drawPreHome() {
   // Hint in basso.
   text('Premi INVIO per giocare', cx, LOGICAL_HEIGHT - 46, 18, 'rgba(255,255,255,0.85)');
 
-  // Mostra e allinea l'<input> sopra la cornice del campo.
+  popUiScale();
+
+  // Mostra e allinea l'<input> sopra la cornice del campo (positionNickInput applica
+  // la stessa uiScale, quindi gira fuori dalla trasformazione del canvas).
   nickInput.style.display = 'block';
   positionNickInput();
 }
 
 function drawHome() {
   const ctx = renderer.ctx;
-  if (BG2_IMG.ready) drawCover(BG2_IMG);
-  else screenBackdrop();
+
+  // Cielo procedurale City (skyline rosso) SOLO sopra FLOOR_Y, esteso ai bordi
+  // reali; scorre in parallasse lenta. Sostituisce drawCover(bg-home.webp).
+  BACKGROUNDS.city.render(renderer, menuTime * HOME_SCROLL, 0, HOME_SKY);
+  // Pavimento a mattoni rossi (stile City) sotto FLOOR_Y, scorre col cubo che
+  // corre. drawBrickFloor diretto (non drawFloorCity) per evitare la tinta
+  // "razzo" di un eventuale themeT residuo da una run precedente: home sempre rossa.
+  drawBrickFloor(menuTime * HOME_SCROLL, CITY_FLOOR_COLOR, CITY_FLOOR_BRICK, CITY_FLOOR_LINE);
+  // Vela scura leggera per la leggibilità della UI.
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx.fillRect(renderer.extLeft, renderer.extTop, renderer.extRight - renderer.extLeft, renderer.extBottom - renderer.extTop);
+
+  pushUiScale(); // UI/cubo ingranditi su mobile (sfondo+vela sopra a piena vista)
 
   // Cubo decorativo che corre e salta in loop (sopra lo sfondo, sotto la UI).
   drawHomeCube();
@@ -1403,6 +1514,8 @@ function drawHome() {
   if (STATS_IMG.ready) ctx.drawImage(STATS_IMG.img, b.stats.x, b.stats.y, b.stats.w, b.stats.h);
 
   text('P = CUBO   •   O = OPZIONI   •   S = STATS', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+
+  popUiScale();
 }
 
 // Pannello stile GD (rettangolo arrotondato con bordo scuro).
@@ -1422,6 +1535,8 @@ function panel(x, y, w, h, fill) {
 function drawLevels() {
   const ctx = renderer.ctx;
   screenBackdrop();
+
+  pushUiScale(); // pannello/testi/frecce ingranditi su mobile
 
   // Pannello centrale con anteprima sfondo del livello + info.
   const pw = 720;
@@ -1504,11 +1619,15 @@ function drawLevels() {
     ? 'PROSSIMAMENTE   •   ESC INDIETRO'
     : 'SPAZIO / CLICK PER GIOCARE   •   ESC INDIETRO';
   text(hint, LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+
+  popUiScale();
 }
 
 // Schermo di fine livello: monete raccolte + record salvato.
 function drawComplete() {
   screenBackdrop();
+
+  pushUiScale(); // pannello/testi/monete ingranditi su mobile
 
   const pw = 720;
   const ph = 360;
@@ -1543,6 +1662,8 @@ function drawComplete() {
   );
 
   text('SPAZIO / CLICK = RIGIOCA   •   ESC = MENU', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+
+  popUiScale();
 }
 
 // Rettangoli cliccabili dello schermo Opzioni (− / + per ogni volume, mute, back).
@@ -1565,6 +1686,8 @@ function optionRects() {
 // Schermo Opzioni: volumi Musica/Effetti (con −/+), mute, indietro.
 function drawOptions() {
   screenBackdrop();
+
+  pushUiScale(); // pannello/bottoni/percentuali ingranditi su mobile
 
   const pw = 720;
   const ph = 500;
@@ -1597,6 +1720,8 @@ function drawOptions() {
   arrow(backArrowRect(), -1, UI.yellow);
 
   text('ESC = INDIETRO', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 36, 20, 'rgba(255,255,255,0.9)');
+
+  popUiScale();
 }
 
 // Rettangolo cliccabile della freccia "indietro" (in alto a sinistra), condiviso
@@ -1613,6 +1738,8 @@ function statsBackRect() {
 // (etichetta a sinistra, valore a destra) + freccia di ritorno.
 function drawStats() {
   screenBackdrop();
+
+  pushUiScale(); // pannello/righe/titolo ingranditi su mobile
 
   // Freccia di ritorno in alto a sinistra.
   arrow(statsBackRect(), -1, UI.yellow);
@@ -1652,6 +1779,8 @@ function drawStats() {
   ctx.restore();
 
   text('FRECCIA / ESC = INDIETRO', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+
+  popUiScale();
 }
 
 // Barra stile GD: pillola scura con riempimento verde e percentuale/etichetta.
@@ -1705,6 +1834,9 @@ function playerSlots() {
 function drawPlayers() {
   const ctx = renderer.ctx;
   screenBackdrop();
+
+  pushUiScale(); // cubi/nome/titolo ingranditi su mobile
+
   text('SCEGLI IL PLAYER', LOGICAL_WIDTH / 2, 140, 56, UI.yellow);
 
   // Due cubi affiancati direttamente sullo sfondo (niente box). Il selezionato
@@ -1730,6 +1862,8 @@ function drawPlayers() {
   arrow(backArrowRect(), -1, UI.yellow);
 
   text('←  →  / CLICK PER SCEGLIERE   •   SPAZIO PER CONFERMARE', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 50, 22, 'rgba(255,255,255,0.9)');
+
+  popUiScale();
 }
 
 // Pulse 0..1 che batte sul beat (1 sul colpo, decade fino al successivo).
@@ -2058,53 +2192,84 @@ function drawCoinIcon(cx, cy, r, filled = true) {
   ctx.restore();
 }
 
+// Layout condiviso della riga HUD in alto (tentativi · barra · monete · pausa),
+// tutto su UNA linea centrata verticalmente, dentro l'area sicura (safe*), con
+// margini sx/dx uguali e spaziatura coerente. Ingrandito su mobile via uiScale().
+// I 4 disegnatori (drawHud, drawProgressBar, drawPauseButton) + l'hit-test della
+// pausa leggono da qui, così restano sempre allineati e dentro lo schermo.
+function topHudLayout() {
+  const s = uiScale();
+  const m = 24 * s; // margine dai bordi sicuri
+  const fontPx = 26 * s; // font tentativi/monete
+  const barH = 22 * s;
+  const pauseR = 22 * s; // raggio anello pausa
+  const coinR = 15 * s;
+
+  // Linea centrale della riga: l'elemento più alto è l'anello pausa (2*pauseR).
+  const rowTop = renderer.safeTop + 14 * s;
+  const rowH = Math.max(barH, pauseR * 2, fontPx);
+  const cy = rowTop + rowH / 2;
+
+  // Barra centrata sull'area sicura visibile.
+  const safeMid = (renderer.safeLeft + renderer.safeRight) / 2;
+  // Larghezza barra: 42% del logico * scala, ma cap per non invadere i lati.
+  const safeW = renderer.safeRight - renderer.safeLeft;
+  const barW = Math.min(LOGICAL_WIDTH * 0.42 * s, safeW * 0.5);
+  const barX = safeMid - barW / 2;
+
+  return {
+    s,
+    m,
+    fontPx,
+    cy,
+    bar: { x: barX, y: cy - barH / 2, w: barW, h: barH },
+    attemptsX: renderer.safeLeft + m,
+    pause: { cx: renderer.safeRight - m - pauseR, cy, r: pauseR },
+    coinR,
+    coinGap: 8 * s, // icona ↔ testo monete
+    pauseGap: 18 * s, // testo monete ↔ anello pausa
+  };
+}
+
 function drawHud() {
   const ctx = renderer.ctx;
+  const L = topHudLayout();
+
+  // TENTATIVI a sinistra, centrato sulla linea della riga.
   ctx.save();
-  ctx.textBaseline = 'top';
+  ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
-  ctx.font = uiFont('26px');
+  ctx.font = uiFont(`${L.fontPx}px`);
   ctx.lineJoin = 'round';
-  ctx.lineWidth = 5;
+  ctx.lineWidth = Math.max(4, L.fontPx * 0.2);
   ctx.strokeStyle = UI.outline;
-  ctx.strokeText(`TENTATIVI: ${attempts}`, 24, 56);
+  ctx.strokeText(`TENTATIVI: ${attempts}`, L.attemptsX, L.cy);
   ctx.fillStyle = '#fff';
-  ctx.fillText(`TENTATIVI: ${attempts}`, 24, 56);
+  ctx.fillText(`TENTATIVI: ${attempts}`, L.attemptsX, L.cy);
   ctx.restore();
 
-  // Contatore monete in alto a destra, con icona moneta.
-  const cr = 15;
-  const cyc = 56 + 13;
+  // Monete a destra, appena a sinistra dell'anello pausa: [icona] N/M.
   const label = `${coinsCollected}/${COINS_PER_LEVEL}`;
+  const textRight = L.pause.cx - L.pause.r - L.pauseGap;
   ctx.save();
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'right';
-  ctx.font = uiFont('26px');
+  ctx.font = uiFont(`${L.fontPx}px`);
   ctx.lineJoin = 'round';
-  ctx.lineWidth = 5;
-  // Il tastino pausa ora è in alto (riga della barra), quindi il contatore
-  // monete può tornare al bordo destro nella sua riga senza sovrapporsi.
-  const tx = LOGICAL_WIDTH - 24;
+  ctx.lineWidth = Math.max(4, L.fontPx * 0.2);
   ctx.strokeStyle = UI.outline;
-  ctx.strokeText(label, tx, cyc);
+  ctx.strokeText(label, textRight, L.cy);
   ctx.fillStyle = '#fff';
-  ctx.fillText(label, tx, cyc);
-  ctx.restore();
-  // Misura il testo per piazzare l'icona alla sua sinistra.
-  ctx.save();
-  ctx.font = uiFont('26px');
+  ctx.fillText(label, textRight, L.cy);
   const tw = ctx.measureText(label).width;
   ctx.restore();
-  drawCoinIcon(tx - tw - cr - 8, cyc, cr, true);
+  drawCoinIcon(textRight - tw - L.coinR - L.coinGap, L.cy, L.coinR, true);
 }
 
 // Barra di avanzamento centrata in alto: pillola gialla con bordo bianco glow.
 function drawProgressBar() {
   const ctx = renderer.ctx;
-  const w = LOGICAL_WIDTH * 0.42; // più stretta e centrata (come l'originale)
-  const h = 22;
-  const x = (LOGICAL_WIDTH - w) / 2;
-  const y = 22;
+  const { x, y, w, h } = topHudLayout().bar;
   const r = h / 2;
 
   const progress = Math.max(0, Math.min(1, player.x / finishX));
@@ -2151,10 +2316,10 @@ function roundRect(ctx, x, y, w, h, r) {
 
 // --- Banner "Aggiungi a Home" (fullscreen su iPhone) ------------------------
 // Safari iPhone non ha la Fullscreen API in-scheda: l'unico vero fullscreen e'
-// installare il sito da Home. Mostriamo un invito SOLO su iOS in Safari (non gia'
-// in standalone) e non gia' chiuso dall'utente. In standalone il banner non serve.
+// installare il sito da Home. Mostriamo un invito (non chiudibile) SOLO su iOS in
+// Safari (non gia' in standalone), per spingere all'installazione. In standalone il
+// banner non serve.
 const installHintEl = document.getElementById('installHint');
-const installHintCloseEl = document.getElementById('installHintClose');
 
 function isIos() {
   const ua = navigator.userAgent || '';
@@ -2168,15 +2333,8 @@ function isStandalone() {
     (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches)
   );
 }
-function installHintDismissed() {
-  try {
-    return localStorage.getItem('gd_installHintDismissed') === '1';
-  } catch {
-    return false;
-  }
-}
-// Idoneita' statica calcolata una volta: iOS, in Safari (non standalone), non chiuso.
-let installHintEligible = !!installHintEl && isIos() && !isStandalone() && !installHintDismissed();
+// Idoneita' statica calcolata una volta: iOS, in Safari (non standalone).
+const installHintEligible = !!installHintEl && isIos() && !isStandalone();
 
 // Mostra/nasconde il banner in base allo stato corrente (chiamata da render +
 // onOrientationChange). Idempotente: scrive display solo se cambia.
@@ -2186,17 +2344,6 @@ function updateInstallHint() {
   const show = installHintEligible && !orientationBlocked && (gameState === 'prehome' || gameState === 'home');
   const next = show ? 'flex' : 'none';
   if (installHintEl.style.display !== next) installHintEl.style.display = next;
-}
-if (installHintCloseEl) {
-  installHintCloseEl.addEventListener('click', () => {
-    installHintEligible = false;
-    try {
-      localStorage.setItem('gd_installHintDismissed', '1');
-    } catch {
-      // niente persistenza: si richiudera' comunque per questa sessione.
-    }
-    updateInstallHint();
-  });
 }
 
 // --- Wiring orientamento: overlay "ruota il telefono" + freeze ---------------

@@ -190,19 +190,6 @@
         border-top: 2px solid #ffd23f;
         transform: rotate(45deg);
       }
-      #installHint .ih-close {
-        flex: 0 0 auto;
-        width: 30px;
-        height: 30px;
-        border: none;
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.12);
-        color: #ffffff;
-        font-family: inherit;
-        font-size: 18px;
-        line-height: 1;
-        cursor: pointer;
-      }
     </style>
   </head>
   <body>
@@ -214,10 +201,9 @@
       <div class="rotate-sub">Gioca in orizzontale</div>
     </div>
     <!-- Banner "Aggiungi a Home" (mostrato via JS solo su iPhone in Safari). -->
-    <div id="installHint" role="dialog" aria-label="Aggiungi a Home">
+    <div id="installHint" role="dialog" aria-label="Aggiungi alla Home">
       <span class="ih-share" aria-hidden="true"><i></i></span>
-      <span class="ih-text">Per il <b>fullscreen</b>: tocca <b>Condividi</b> e poi <b>"Aggiungi a Home"</b></span>
-      <button id="installHintClose" class="ih-close" type="button" aria-label="Chiudi">✕</button>
+      <span class="ih-text">Gioca a <b>schermo intero</b>! Tocca <b>Condividi</b> e poi <b>"Aggiungi alla Home"</b></span>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

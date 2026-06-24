@@ -53,7 +53,7 @@ src/
   main.js              Entry point: wiring, game-state machine, all UI screens, localStorage persistence, MAPS registry
   config.js            ALL constants: physics, dimensions, colors/themes, LEVELS array, PLAYERS array, tile codes
   engine/
-    Renderer.js        Canvas2D wrapper; DPR resize + letterbox; logical-coord drawing (begin(), rect(), ctx, extLeft/Top/Right/Bottom)
+    Renderer.js        Canvas2D wrapper; DPR resize + letterbox; logical-coord drawing (begin(), rect(), ctx, extLeft/Top/Right/Bottom). Also exposes safe-area insets in LOGICAL coords (safeLeft/Right/Top/Bottom = ext* inset by `env(safe-area-inset-*)`, read via a hidden probe div) for notch-safe HUD placement
     GameLoop.js        Fixed-timestep 60Hz loop (accumulator + interpolation alpha)
     Input.js           Keyboard/mouse/touch → jump; held (continuous) + consumePress() (edge, used by orbs)
     Audio.js           Music: two looped tracks from `MUSIC_TRACKS` (public/ `home.m4a`/`game.mp3`, routed via `music` gain); `setTrack('home'|'game', {restart})` switches them (menus=home, playing=game; game restarts each attempt); `stopMusic()` pauses all tracks immediately (used on death). Falls back to a synth beat (BPM 128) if files are missing. Beat clock always runs for `beatPhase()` (visual pulse). SFX: coin is synth (`_tone`); **file-based one-shots** via `playSfxFile(key)` → bool (fetch→`decodeAudioData`→`AudioBufferSource`, buffers from `SFX_FILES` preloaded in `unlock()`) — the player-select "tag" sounds (`tag-artie`/`tag-miles`), the **death** sound (`death-artie`, `playDeath` falls back to the synth `_tone` if the buffer isn't decoded yet), and the **loader** jingle (`loader` = `tag-tutto-fatto.MP3`). `playSfxOnce(key, onEnded)` is the same pipeline but returns the buffer's `duration` and fires `onEnded` at the end (used by the fake loader to size/finish itself). Both routed via `sfx` gain (respect SFX volume + mute). Music can be silenced per-screen via `setMusicSilenced(bool)` — a `_musicScreenMul` (0/1) multiplied into the `music` gain (single writer `_applyMusicGain()`) WITHOUT touching the persisted `_musicVol`; `main.js` drives it from `gameState` (muted on `players` so the tags stand out). Persistent volume/mute
@@ -135,22 +135,40 @@ src/
   so rotating back lands on the pause overlay, not a death. `drawPreHome()` early-returns (and hides
   the input) while blocked. The viewport meta uses `viewport-fit=cover`.
 - **Install-hint banner (`#installHint`):** DOM banner in `index.html` (styled inline, UI palette +
-  a CSS-drawn iOS Share glyph — no asset, CSP-safe) inviting "Aggiungi a Home" for true fullscreen.
-  Shown **only** on iOS Safari **not** already standalone (`isIos()` + `!isStandalone()` via
-  `navigator.standalone` / `display-mode: standalone|fullscreen`), and not previously dismissed
-  (`gd_installHintDismissed` in localStorage). `updateInstallHint()` (called from `render()` and
+  a CSS-drawn iOS Share glyph — no asset, CSP-safe) inviting "Aggiungi alla Home" for true fullscreen.
+  **Non-dismissible by design** (no close button) to push installing. Shown **only** on iOS Safari
+  **not** already standalone (`isIos()` + `!isStandalone()` via `navigator.standalone` /
+  `display-mode: standalone|fullscreen`). `updateInstallHint()` (called from `render()` and
   `onOrientationChange()`) toggles it `flex`/`none`: visible only in `prehome`/`home` and landscape
-  (hidden in portrait — `#rotate` wins, lower z-index). The ✕ button persists the dismissal. In
-  standalone (goal reached) it never appears.
+  (hidden in portrait — `#rotate` wins, lower z-index). In standalone (goal reached) it never appears.
+- **Mobile UI scale (`uiScale()`):** the scene is a fixed 1280×720 fit-to-contain, so on a phone the
+  UI looks tiny. `uiScale()` returns **1 on fine pointer (desktop → unchanged)**; on coarse pointer
+  it grows as the fit-scale shrinks (`UI_SCALE_PIVOT/fit`, clamped `[1, UI_SCALE_MAX]`).
+  `pushUiScale()`/`popUiScale()` wrap the **UI block of each menu draw** (after the background, which
+  stays full-bleed/**uncropped**) in a scale-about-logical-center transform — enlarges
+  panels/buttons/icons/text uniformly with no per-element edits. Wrapped: `drawPreHome`/`drawHome`/
+  `drawLoader`/`drawLevels`/`drawComplete`/`drawOptions`/`drawStats`/`drawPlayers`/`drawPauseOverlay`.
+  Hit-testing: the `pointerdown` handler maps the pointer with `unscalePoint(p)` (inverse center-scale)
+  for all UI/pause-overlay states, so every rect helper stays unchanged. The nickname `<input>` (DOM)
+  mirrors the same scale in `positionNickInput()`.
 - **Mobile fullscreen sizing:** `Renderer._resize()` also listens on `orientationchange` and
   `visualViewport` (`resize`/`scroll`) so the letterbox recomputes cleanly when Safari's address bar
   shows/hides (avoids bands/jitter). In standalone there's no bar, so it's a no-op there.
+- **Top HUD row (`topHudLayout()`):** in `playing`, attempts (left) · progress bar (center) · coins +
+  pause button (right) share **one center line inside the safe-area rect** (`renderer.safe*`), equal
+  side margins, coherent gaps, all sized ×`uiScale()`. `drawHud`/`drawProgressBar`/`pauseBtnCircle`/
+  `drawPauseButton` + `pointInPauseBtn` all read it, so the pause button stays on-screen (anchored to
+  `safeRight`, not `extRight` → never under the notch) and the row is aligned on desktop + mobile. The
+  HUD is NOT center-scaled (anchored to edges), so its hit-test uses the RAW pointer.
+- **Mobile nickname `<input>`:** font-size clamped to ≥16px (below 16px iOS auto-zooms on focus);
+  repositioned on `visualViewport` `resize`/`scroll` + on `focus` (so it tracks the keyboard) and given
+  `z-index:5` (above canvas, below banner/rotate). `positionNickInput()` also applies `uiScale()`.
 - **Back navigation:** a shared "indietro" arrow (`backArrowRect()` + `arrow(rect,-1)`, top-left) is
   drawn and hit-tested on `players`/`levels`/`options`/`stats` → returns to `home`. On `levels`/`players`
   the arrow is checked first (priority over "click = play"/select).
-- **Persistence (localStorage):** `gd_audio` (music/sfx/muted), `gd_bestCoins` (per-level coin
-  record), `gd_levelStats` (per-level bestPct/attempts/jumps), `gd_nickname` (player nickname),
-  `gd_installHintDismissed` (`'1'` once the Add-to-Home banner is closed).
+- **Persistence (localStorage):** `gd_audio` (music/sfx/muted; fresh-install default 50%/50%/unmuted),
+  `gd_bestCoins` (per-level coin record), `gd_levelStats` (per-level bestPct/attempts/jumps),
+  `gd_nickname` (player nickname).
 - **Backgrounds registry:** procedural `BACKGROUNDS = { neon, city, la }` + image backgrounds built
   lazily in `getBg(key)` from `IMG_BG = { losangeles:'LA', metro:'metro', carwash:'wash',
   boulevard:'boulevard' }` (each an `ImageBackground` tiling its WebP in a slow horizontal loop,
@@ -160,6 +178,16 @@ src/
   city & carwash=brick texture (shared `drawBrickFloor`; city=red bricks + light edge, carwash=dark
   asphalt bricks + red-neon glow edge via `neonTop`) · la & boulevard=plank walkway (shared
   `drawPlankFloor`, purple vs blue) · metro=light-purple platform with wide tiles.
+- **Home screen composition (`drawHome`):** the home uses the **same sky-above-`FLOOR_Y` +
+  procedural-floor-below-`FLOOR_Y`** scheme as the levels (NOT `drawCover(bg-home.webp)`): the
+  procedural City skyline `BACKGROUNDS.city.render(…, menuTime*HOME_SCROLL, 0, HOME_SKY)` draws the
+  sky (red, `HOME_SKY`) only above `FLOOR_Y`, then `drawBrickFloor(menuTime*HOME_SCROLL, CITY_FLOOR_*)`
+  draws the red brick floor below it (called directly, bypassing `drawFloorCity`'s rocket tint so the
+  home stays red), both scrolling slowly (`HOME_SCROLL`), then a light `rgba(0,0,0,0.28)` veil. The
+  decorative running/jumping cube (`drawHomeCube`) is grounded on **`FLOOR_Y` (`groundY = FLOOR_Y -
+  size`)**, so cube and floor stay aligned at **every resolution/aspect ratio** (the old image baked a
+  floor in that drifted vs the cube's fixed `LOGICAL_HEIGHT*0.85`). `bg-home.webp` (`BG2_IMG`) is still
+  used by **pre-home** and **loader** via `drawCover` (no floor-grounded cube there, so no misalignment).
 - **Rocket-mode ambiance (driven by `themeT`, 0=cube→1=ship):** when the ship is active the floor
   colors lerp toward `ROCKET_FLOOR_COLOR`/`ROCKET_FLOOR_LINE` (via `rocketFloor()` in `drawFloorCity`),
   a `RocketField` (stars + warp speed lines) draws behind the gameplay, and `drawRocketAmbiance()`
@@ -191,7 +219,8 @@ Velocities are scaled ×1.30 and gravity ×1.69 vs. an earlier "slow" baseline (
   `main.js render` → `level.render(…, fillBottom)` → `obstacle.render` (`_renderBlock`/`_renderSpike`,
   default `OBSTACLE_FILL_BOTTOM` if absent); the same color also feeds the cube's **vector fallback**
   in `Player._renderCube` (the PNG skin is unaffected). `_renderSpikeFloor` keeps its black/ice look.
-- **Audio:** `BPM = 128`, `MUSIC_VOLUME`/`SFX_VOLUME` defaults, and
+- **Audio:** `BPM = 128`, `MUSIC_VOLUME = 0.5` / `SFX_VOLUME = 0.5` (fresh-install defaults: both ON
+  at 50%, unmuted; saved `gd_audio` overrides them for returning players), and
   `MUSIC_TRACKS = { home: '/home.m4a', game: '/game.mp3' }` — the looped background tracks (drop the
   files in `public/`; menus play `home`, levels play `game` via `audio.setTrack`; if absent, the
   synth beat plays instead). `SFX_FILES = { 'tag-artie', 'tag-miles', 'death-artie', loader }`

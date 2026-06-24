@@ -339,7 +339,7 @@ export const PARALLAX_LAYERS = [
 
 // Audio / beat.
 export const BPM = 128; // battiti al minuto del beat segnaposto
-export const MUSIC_VOLUME = 0.18; // volume musica di default (0..1)
+export const MUSIC_VOLUME = 0.5; // volume musica di default (0..1)
 export const SFX_VOLUME = 0.5; // volume effetti sonori di default (0..1)
 // Brani di sottofondo (loop), uno per contesto. Se un file manca → fallback al
 // beat sintetizzato. 'home' suona nei menu, 'game' durante un livello.

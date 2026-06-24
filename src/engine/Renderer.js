@@ -23,6 +23,13 @@ export class Renderer {
     this._offsetX = 0;
     this._offsetY = 0;
 
+    // Safe-area insets (notch/angoli/home-indicator) in coordinate LOGICHE.
+    // Leggibili solo via env() in CSS: usiamo un <div> sonda fixed e invisibile il
+    // cui padding rispecchia env(safe-area-inset-*); ne leggiamo il padding (px) al
+    // resize e lo convertiamo in logico. Su desktop/no-notch restano 0.
+    this._safe = { left: 0, right: 0, top: 0, bottom: 0 };
+    this._safeProbe = this._createSafeProbe();
+
     this._resize = this._resize.bind(this);
     window.addEventListener('resize', this._resize);
     window.addEventListener('orientationchange', this._resize);
@@ -34,6 +41,27 @@ export class Renderer {
       window.visualViewport.addEventListener('scroll', this._resize);
     }
     this._resize();
+  }
+
+  // Crea (una volta) il <div> sonda per leggere le safe-area insets via env().
+  _createSafeProbe() {
+    if (typeof document === 'undefined') return null;
+    const el = document.createElement('div');
+    Object.assign(el.style, {
+      position: 'fixed',
+      left: '0',
+      top: '0',
+      width: '0',
+      height: '0',
+      visibility: 'hidden',
+      pointerEvents: 'none',
+      paddingLeft: 'env(safe-area-inset-left, 0px)',
+      paddingRight: 'env(safe-area-inset-right, 0px)',
+      paddingTop: 'env(safe-area-inset-top, 0px)',
+      paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+    });
+    document.body.appendChild(el);
+    return el;
   }
 
   // Adatta il canvas alla finestra tenendo conto del DPR.
@@ -51,6 +79,16 @@ export class Renderer {
     this._scale = scale * dpr;
     this._offsetX = (cssW * dpr - LOGICAL_WIDTH * this._scale) / 2;
     this._offsetY = (cssH * dpr - LOGICAL_HEIGHT * this._scale) / 2;
+
+    // Safe-area insets: padding della sonda (px CSS) → logico (px CSS / scala fit).
+    if (this._safeProbe) {
+      const cs = getComputedStyle(this._safeProbe);
+      const toLogical = (v) => (parseFloat(v) || 0) / scale;
+      this._safe.left = toLogical(cs.paddingLeft);
+      this._safe.right = toLogical(cs.paddingRight);
+      this._safe.top = toLogical(cs.paddingTop);
+      this._safe.bottom = toLogical(cs.paddingBottom);
+    }
   }
 
   // Bordi del canvas REALE espressi in coordinate LOGICHE (per disegnare sfondi
@@ -66,6 +104,21 @@ export class Renderer {
   }
   get extBottom() {
     return (this.canvas.height - this._offsetY) / this._scale;
+  }
+
+  // Bordi REALI del canvas rientrati della safe-area (notch/angoli/home-indicator),
+  // in coordinate logiche. Su desktop/no-notch coincidono con ext* (insets 0).
+  get safeLeft() {
+    return this.extLeft + this._safe.left;
+  }
+  get safeRight() {
+    return this.extRight - this._safe.right;
+  }
+  get safeTop() {
+    return this.extTop + this._safe.top;
+  }
+  get safeBottom() {
+    return this.extBottom - this._safe.bottom;
   }
 
   // Pulisce lo schermo e prepara la trasformazione logica per il frame.
