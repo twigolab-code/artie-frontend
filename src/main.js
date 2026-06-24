@@ -470,6 +470,44 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 });
 
+// --- Hover dei pulsanti (solo desktop / pointer fine) ----------------------
+// Su PC i bottoni dei menu fanno un leggero zoom quando il mouse ci passa sopra.
+// `hoverPt` è la posizione del mouse nello spazio UI (scalato-attorno-al-centro,
+// come i rect dei menu); resta null su touch (pointer coarse), così su mobile non
+// c'è alcun effetto. `hoverHit` viene alzato durante il disegno da hoverScale()
+// quando il mouse è su un rect cliccabile: serve solo a impostare il cursore.
+let hoverPt = null;
+let hoverHit = false;
+const HOVER_SCALE = 1.06; // ingrandimento dei bottoni al passaggio del mouse
+canvas.addEventListener('mousemove', (e) => {
+  if (mqCoarse.matches) { hoverPt = null; return; } // touch: nessun hover
+  hoverPt = unscalePoint(toLogical(e));
+});
+canvas.addEventListener('mouseleave', () => { hoverPt = null; });
+// Scala di hover per un rect (centro-su-rect): 1 se non c'è hover / touch / fuori,
+// HOVER_SCALE se il mouse è dentro. Alza hoverHit per il cursore "pointer".
+function hoverScale(rect) {
+  if (!hoverPt) return 1;
+  if (!pointInRect(hoverPt, rect)) return 1;
+  hoverHit = true;
+  return HOVER_SCALE;
+}
+// Esegue drawFn() applicando lo zoom di hover attorno al centro di `rect` (per gli
+// elementi cliccabili disegnati "a mano": icone Opzioni/Stats, cubi del player).
+function withHover(rect, drawFn) {
+  const s = hoverScale(rect);
+  const ctx = renderer.ctx;
+  if (s === 1) { drawFn(); return; }
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(s, s);
+  ctx.translate(-cx, -cy);
+  drawFn();
+  ctx.restore();
+}
+
 // --- Campo nickname: <input> HTML sovrapposto al canvas (solo in pre-home) ---
 // Un vero <input> dà tastiera mobile nativa, cursore e incolla "gratis". È
 // trasparente (lo sfondo/cornice li disegna il canvas in drawPreHome) e viene
@@ -509,14 +547,10 @@ nickInput.addEventListener('keydown', (e) => {
 // Al focus (apertura tastiera mobile): riposiziona dopo l'animazione e porta in
 // vista, così il campo resta allineato anche con la tastiera aperta.
 nickInput.addEventListener('focus', () => {
-  setTimeout(() => {
-    positionNickInput();
-    try {
-      nickInput.scrollIntoView({ block: 'center' });
-    } catch {
-      // scrollIntoView non disponibile: nessun problema, l'input resta a posto.
-    }
-  }, 250);
+  // Dopo l'animazione della tastiera riallinea l'input sopra la cornice del campo.
+  // NB: niente scrollIntoView — il body è overflow:hidden (non scrolla) e su iOS può
+  // spostare la visual viewport; positionNickInput() usa già visualViewport.offsetTop.
+  setTimeout(positionNickInput, 250);
 });
 
 // Posiziona/dimensiona l'<input> sopra il rettangolo logico del campo, con la
@@ -883,6 +917,12 @@ function toggleMute() {
 function render(alpha) {
   renderer.begin();
 
+  // Cursore "pointer" su desktop quando il mouse è su un bottone: hoverHit viene
+  // alzato durante il disegno del frame precedente da hoverScale(). Lo applico qui
+  // e lo riazzero per il frame corrente (1 frame di ritardo, impercettibile).
+  if (!mqCoarse.matches) canvas.style.cursor = hoverHit ? 'pointer' : 'default';
+  hoverHit = false;
+
   // L'<input> del nickname è visibile solo nella pre-home: nascondilo altrove.
   if (gameState !== 'prehome' && nickInput.style.display !== 'none') {
     nickInput.style.display = 'none';
@@ -1069,27 +1109,34 @@ function textAligned(str, x, y, size, align, color = UI.text, outline = UI.outli
 }
 
 // Pulsante stile GD: rettangolo arrotondato, fill saturo + outline scuro spesso.
+// Su desktop fa un leggero zoom al passaggio del mouse (withHover, no-op su touch).
 function button(rect, label, color = UI.green) {
   const ctx = renderer.ctx;
-  ctx.save();
-  roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 18);
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.lineWidth = 6;
-  ctx.strokeStyle = UI.outline;
-  roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 18);
-  ctx.stroke();
-  // Riflesso chiaro in alto.
-  ctx.globalAlpha = 0.18;
-  ctx.fillStyle = '#ffffff';
-  roundRect(ctx, rect.x + 8, rect.y + 6, rect.w - 16, rect.h * 0.36, 12);
-  ctx.fill();
-  ctx.restore();
-  text(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + rect.h * 0.16, rect.h * 0.42);
+  withHover(rect, () => {
+    ctx.save();
+    roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 18);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = UI.outline;
+    roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 18);
+    ctx.stroke();
+    // Riflesso chiaro in alto.
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = '#ffffff';
+    roundRect(ctx, rect.x + 8, rect.y + 6, rect.w - 16, rect.h * 0.36, 12);
+    ctx.fill();
+    ctx.restore();
+    text(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + rect.h * 0.16, rect.h * 0.42);
+  });
 }
 
 // Freccia triangolare di navigazione (dir: -1 sinistra, +1 destra), con outline.
+// withHover: leggero zoom al passaggio del mouse su desktop (no-op su touch).
 function arrow(rect, dir, color = UI.green) {
+  withHover(rect, () => _arrow(rect, dir, color));
+}
+function _arrow(rect, dir, color) {
   const ctx = renderer.ctx;
   const cx = rect.x + rect.w / 2;
   const cy = rect.y + rect.h / 2;
@@ -1510,10 +1557,14 @@ function drawHome() {
   button(b.start, 'START', UI.green);
   button(b.player, `PLAYER: ${ply().name}`, UI.blue);
   // Opzioni e Stats come icone affiancate (cliccabili tramite gli stessi rect).
-  if (OPTIONS_IMG.ready) ctx.drawImage(OPTIONS_IMG.img, b.options.x, b.options.y, b.options.w, b.options.h);
-  if (STATS_IMG.ready) ctx.drawImage(STATS_IMG.img, b.stats.x, b.stats.y, b.stats.w, b.stats.h);
+  // withHover: leggero zoom al passaggio del mouse su desktop (no-op su touch).
+  if (OPTIONS_IMG.ready) withHover(b.options, () => ctx.drawImage(OPTIONS_IMG.img, b.options.x, b.options.y, b.options.w, b.options.h));
+  if (STATS_IMG.ready) withHover(b.stats, () => ctx.drawImage(STATS_IMG.img, b.stats.x, b.stats.y, b.stats.w, b.stats.h));
 
-  text('P = CUBO   •   O = OPZIONI   •   S = STATS', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+  // Suggerimenti tasti solo su desktop (su mobile non c'è tastiera).
+  if (!mqCoarse.matches) {
+    text('P = CUBO   •   O = OPZIONI   •   S = STATS', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+  }
 
   popUiScale();
 }
@@ -1615,10 +1666,14 @@ function drawLevels() {
   // Freccia "indietro" in alto a sinistra.
   arrow(backArrowRect(), -1, UI.yellow);
 
-  const hint = L.comingSoon
-    ? 'PROSSIMAMENTE   •   ESC INDIETRO'
-    : 'SPAZIO / CLICK PER GIOCARE   •   ESC INDIETRO';
-  text(hint, LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+  // Suggerimenti tasti solo su desktop (su mobile non c'è tastiera; "COMING SOON"
+  // è già mostrato in grande sul pannello, quindi nulla va perso).
+  if (!mqCoarse.matches) {
+    const hint = L.comingSoon
+      ? 'PROSSIMAMENTE   •   ESC INDIETRO'
+      : 'SPAZIO / CLICK PER GIOCARE   •   ESC INDIETRO';
+    text(hint, LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+  }
 
   popUiScale();
 }
@@ -1661,7 +1716,10 @@ function drawComplete() {
     UI.yellow
   );
 
-  text('SPAZIO / CLICK = RIGIOCA   •   ESC = MENU', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+  // Suggerimenti tasti solo su desktop (su mobile si tocca lo schermo per rigiocare).
+  if (!mqCoarse.matches) {
+    text('SPAZIO / CLICK = RIGIOCA   •   ESC = MENU', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+  }
 
   popUiScale();
 }
@@ -1719,7 +1777,10 @@ function drawOptions() {
   // Freccia "indietro" in alto a sinistra (coerente con le altre schermate).
   arrow(backArrowRect(), -1, UI.yellow);
 
-  text('ESC = INDIETRO', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 36, 20, 'rgba(255,255,255,0.9)');
+  // Suggerimento tasto solo su desktop (su mobile c'è la freccia "indietro").
+  if (!mqCoarse.matches) {
+    text('ESC = INDIETRO', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 36, 20, 'rgba(255,255,255,0.9)');
+  }
 
   popUiScale();
 }
@@ -1778,7 +1839,10 @@ function drawStats() {
   });
   ctx.restore();
 
-  text('FRECCIA / ESC = INDIETRO', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+  // Suggerimento tasto solo su desktop (su mobile c'è la freccia "indietro").
+  if (!mqCoarse.matches) {
+    text('FRECCIA / ESC = INDIETRO', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
+  }
 
   popUiScale();
 }
@@ -1846,22 +1910,28 @@ function drawPlayers() {
     const skin = getSkin(P.skin);
     const sel = slot.i === playerIndex;
 
-    ctx.save();
-    ctx.globalAlpha = sel ? 1 : 0.55;
-    if (sel) {
-      ctx.shadowColor = '#ffffff';
-      ctx.shadowBlur = 28;
-    }
-    if (skin.ready) ctx.drawImage(skin.img, slot.x, slot.y, slot.w, slot.h);
-    ctx.restore();
+    // withHover: leggero zoom al passaggio del mouse su desktop (no-op su touch).
+    withHover(slot, () => {
+      ctx.save();
+      ctx.globalAlpha = sel ? 1 : 0.55;
+      if (sel) {
+        ctx.shadowColor = '#ffffff';
+        ctx.shadowBlur = 28;
+      }
+      if (skin.ready) ctx.drawImage(skin.img, slot.x, slot.y, slot.w, slot.h);
+      ctx.restore();
 
-    if (sel) text(P.name.toUpperCase(), slot.cx, slot.y + slot.h + 50, 40);
+      if (sel) text(P.name.toUpperCase(), slot.cx, slot.y + slot.h + 50, 40);
+    });
   }
 
   // Freccia "indietro" in alto a sinistra.
   arrow(backArrowRect(), -1, UI.yellow);
 
-  text('←  →  / CLICK PER SCEGLIERE   •   SPAZIO PER CONFERMARE', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 50, 22, 'rgba(255,255,255,0.9)');
+  // Suggerimenti tasti solo su desktop (su mobile si tocca il cubo per scegliere).
+  if (!mqCoarse.matches) {
+    text('←  →  / CLICK PER SCEGLIERE   •   SPAZIO PER CONFERMARE', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 50, 22, 'rgba(255,255,255,0.9)');
+  }
 
   popUiScale();
 }

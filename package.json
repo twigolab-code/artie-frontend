@@ -1,9 +1,9 @@
 {
-  "name": "georush",
+  "name": "og-dash",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "GeoRush — clone in stile Geometry Dash (Vite + Canvas 2D, JS vanilla)",
+  "description": "OG DASH - Swag Music Edition — clone in stile Geometry Dash (Vite + Canvas 2D, JS vanilla)",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

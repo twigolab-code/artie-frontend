@@ -1,8 +1,9 @@
-# CLAUDE.md — GeoRush
+# CLAUDE.md — OG DASH
 
-Context for working on **GeoRush**, a Geometry Dash–style clone. This file is the onboarding
-doc: read it first so you don't have to re-explore the codebase. Code comments and domain terms
-(level names, `Facile`/`Medio`/`Difficile`) are in Italian; this guide is in English.
+Context for working on **OG DASH — Swag Music Edition** (repo/codename "georush"), a Geometry
+Dash–style clone. This file is the onboarding doc: read it first so you don't have to re-explore
+the codebase. Code comments and domain terms (level names, `Facile`/`Medio`/`Difficile`) are in
+Italian; this guide is in English.
 
 > **Keep this file updated.** Whenever a change touches levels, tile codes, physics constants,
 > the `config.js`/`LEVELS` structure, or the module layout, update the matching section here in
@@ -10,7 +11,7 @@ doc: read it first so you don't have to re-explore the codebase. Code comments a
 
 ## 1. Overview
 - **Stack:** Vite 6 + HTML5 Canvas 2D + vanilla ES modules. No framework, no TypeScript.
-- `package.json`: `name: georush`, `"type": "module"`, only dev dep is `vite ^6.0.0`.
+- `package.json`: `name: og-dash`, `"type": "module"`, only dev dep is `vite ^6.0.0`.
 - Single full-screen canvas `#game`. All gameplay/UI is drawn in a fixed **logical resolution
   1280×720**, letterboxed to fit the screen (DPR-aware) by `Renderer`.
 
@@ -124,6 +125,19 @@ src/
   only acts on the pause button, so a tap elsewhere falls through to `Input.js` (one jump, no
   conflict). The pause button's tap tolerance is `+16` logical px (≈44px CSS) in `pointInPauseBtn`;
   the drawn ring is unchanged.
+- **Desktop hover zoom (fine pointer only):** menu buttons/arrows/icons grow slightly (`HOVER_SCALE`
+  = 1.06) when the mouse is over them. A `mousemove`/`mouseleave` pair on the canvas keeps `hoverPt`
+  (the pointer in UI space via `unscalePoint(toLogical(e))`); it stays `null` on coarse pointers, so
+  there is **no** effect on touch. `hoverScale(rect)` returns the scale (and raises `hoverHit`);
+  `button()`/`arrow()` wrap their whole draw in `withHover(rect, …)` (a scale-about-rect-center
+  transform), and the hand-drawn clickables (Home options/stats icons, player-select cubes) call
+  `withHover` directly. The cursor switches to `pointer` when `hoverHit` is set — applied at the top of
+  `render()` and reset each frame (1-frame lag, imperceptible). Composes cleanly with `pushUiScale`
+  because `uiScale()` is 1 on desktop (the only place hover runs).
+- **Desktop-only key hints:** every bottom-of-screen keyboard hint (`P = CUBO …`, `SPAZIO / CLICK …`,
+  `ESC = INDIETRO`, `FRECCIA / ESC …`, the player-select `← →` line) is wrapped in
+  `if (!mqCoarse.matches)` so it renders only on a fine pointer. On mobile there's no keyboard, and the
+  on-screen affordances (back arrow, big `COMING SOON`, tap-to-play) already convey the same thing.
 - **Force landscape (portrait block):** on touch devices held in portrait the game freezes and a
   DOM overlay `#rotate` (in `index.html`, styled in the inline `<style>` with the UI palette +
   `SoccerLeague` font + a CSS-animated phone glyph — no asset, CSP-safe) covers everything incl. the
@@ -340,6 +354,8 @@ Boulevard · Metro. Levels other than City/LA are **placeholder copies of the `s
   `mousedown`/`click` UI listener on the canvas or taps will double-fire; don't add `preventDefault`
   in that handler (it'd fight the nickname `<input>` focus — `Input.js` already prevents default on
   `touchstart` for the jump). In-game jump lives in `Input.js`, separate from the UI handler.
+  The only other canvas mouse listeners are the **hover** `mousemove`/`mouseleave` pair (desktop zoom,
+  see §4) — they only read the position, never trigger actions, so they don't interfere.
 - No automated tests: validate gameplay by a static grid walk against §7, then `npm run dev` (test
   mobile via DevTools device emulation: portrait shows the `#rotate` overlay + freezes; landscape
   menus are tappable).

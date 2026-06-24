@@ -33,13 +33,11 @@ export class Renderer {
     this._resize = this._resize.bind(this);
     window.addEventListener('resize', this._resize);
     window.addEventListener('orientationchange', this._resize);
-    // iOS Safari: lo show/hide della barra cambia innerHeight ma non sempre emette
-    // 'resize' pulito; visualViewport notifica il cambio reale dell'area visibile,
-    // così il letterbox si ricalcola senza bande/jitter. (In standalone è inattivo.)
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', this._resize);
-      window.visualViewport.addEventListener('scroll', this._resize);
-    }
+    // NB: NON agganciare visualViewport a _resize. Su iOS l'apertura della tastiera
+    // riduce SOLO la visual viewport (non il layout viewport): rifare il letterbox
+    // farebbe "restringere" la scena. Lo show/hide della barra indirizzi cambia il
+    // layout viewport ed emette un normale 'resize' su window, già gestito sopra.
+    // La visualViewport serve solo a riposizionare l'<input> nickname (vedi main.js).
     this._resize();
   }
 
@@ -66,6 +64,18 @@ export class Renderer {
 
   // Adatta il canvas alla finestra tenendo conto del DPR.
   _resize() {
+    // Guardia tastiera iOS: se è a fuoco un campo di testo e l'altezza si è SOLO
+    // ridotta (larghezza invariata), è l'apertura della tastiera — non un vero
+    // resize di layout. NON rifare il letterbox, altrimenti la scena si restringe.
+    // (La barra indirizzi cambia l'altezza ma SENZA input a fuoco → typing=false →
+    //  rifà normalmente; la rotazione cambia anche la larghezza → rifà.)
+    const dpr0 = window.devicePixelRatio || 1;
+    const newW0 = Math.floor(window.innerWidth * dpr0);
+    const newH0 = Math.floor(window.innerHeight * dpr0);
+    const ae = document.activeElement;
+    const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
+    if (typing && newW0 === this.canvas.width && newH0 < this.canvas.height) return;
+
     const dpr = window.devicePixelRatio || 1;
     const cssW = window.innerWidth;
     const cssH = window.innerHeight;
