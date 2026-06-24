@@ -75,6 +75,8 @@ import {
   COIN_EDGE,
   COIN_STAR,
   COIN_STAR_EDGE,
+  MUSIC_VOLUME,
+  SFX_VOLUME,
 } from './config.js';
 
 // Font UI con fallback finché Lilita One non è caricato (vedi fontState).
@@ -598,8 +600,11 @@ if (window.visualViewport) {
 
 function init() {
   player.setSkin(getSkin(ply().skin));
-  // Applica le impostazioni audio salvate (i valori restano memorizzati
-  // nell'engine e vengono applicati ai nodi alla prima interazione / unlock).
+  // Rimuove eventuali impostazioni audio legacy: non vengono più usate né salvate
+  // (l'audio parte sempre a 50% ON, vedi getSettings/saveSettings).
+  try { localStorage.removeItem('gd_audio'); } catch {}
+  // Applica i default audio (50% musica + effetti, non muto) all'engine; i valori
+  // vengono poi applicati ai nodi alla prima interazione / unlock.
   const s = getSettings();
   audio.setMusicVolume(s.music);
   audio.setSfxVolume(s.sfx);
@@ -875,28 +880,17 @@ function commitRunStats(id, runJumpsN, runPct) {
 }
 
 // --- Impostazioni audio (localStorage) -------------------------------------
+// L'audio parte SEMPRE acceso al 50% (musica + effetti), su desktop e mobile.
+// Volutamente NON leggiamo localStorage: i default valgono a ogni avvio,
+// così vecchi valori salvati (volume basso / muto) non possono mai "spegnere"
+// l'audio. Le regolazioni nelle Opzioni valgono solo per la sessione corrente.
 function getSettings() {
-  try {
-    const s = JSON.parse(localStorage.getItem('gd_audio')) || {};
-    return {
-      music: s.music ?? audio.musicVolume,
-      sfx: s.sfx ?? audio.sfxVolume,
-      muted: s.muted ?? false,
-    };
-  } catch {
-    return { music: audio.musicVolume, sfx: audio.sfxVolume, muted: false };
-  }
+  return { music: MUSIC_VOLUME, sfx: SFX_VOLUME, muted: false };
 }
-function saveSettings() {
-  try {
-    localStorage.setItem(
-      'gd_audio',
-      JSON.stringify({ music: audio.musicVolume, sfx: audio.sfxVolume, muted: audio.muted })
-    );
-  } catch {
-    // nessuna persistenza disponibile: continua comunque.
-  }
-}
+// Le impostazioni audio NON vengono persistite: l'audio riparte sempre a 50% ON
+// al prossimo avvio (vedi getSettings). Le regolazioni nelle Opzioni restano
+// attive solo per la sessione corrente.
+function saveSettings() {}
 // Controlli volume/mute dallo schermo Opzioni (step 10%). Applicano all'audio,
 // salvano e danno un piccolo feedback sonoro (anteprima volume effetti).
 const VOL_STEP = 0.1;
@@ -1283,6 +1277,18 @@ function drawCover(handle) {
 // di ciclo (niente fisica). Usa la skin del player selezionato (+ scia rossa).
 function drawHomeCube() {
   const ctx = renderer.ctx;
+  // Scala come la UI ma con PIVOT sul pavimento (cx logico, FLOOR_Y), non sul
+  // centro: così il punto di contatto col pavimento resta fisso su FLOOR_Y anche
+  // su mobile (pushUiScale userebbe il centro y=360, spingendo il cubo sotto terra).
+  const us = uiScale();
+  ctx.save();
+  if (us !== 1) {
+    const pivotX = LOGICAL_WIDTH / 2;
+    const pivotY = FLOOR_Y;
+    ctx.translate(pivotX, pivotY);
+    ctx.scale(us, us);
+    ctx.translate(-pivotX, -pivotY);
+  }
   const size = 150; // cubo grande decorativo (ridotto: a terra appoggia su FLOOR_Y)
   const groundY = FLOOR_Y - size; // bordo superiore: il cubo poggia ESATTAMENTE su FLOOR_Y (=600)
   const T = 2.0; // durata del ciclo (s) — cubo più veloce
@@ -1308,9 +1314,17 @@ function drawHomeCube() {
     angle = k * Math.PI * 2; // un giro durante il salto
   }
 
-  // Scia rossa: qualche eco della posizione poco prima (calcolata al volo).
-  for (let i = 6; i >= 1; i--) {
-    const pp = ((menuTime - i * 0.035) % T + T) % T;
+  // Scia rossa: echi delle posizioni PRECEDENTI lungo lo stesso ciclo, campionati
+  // a 0.016s come la Trail in-game. Tempo-di-fase NON wrappato (pe); saltiamo gli
+  // echi con pe<0 (ciclo precedente, cubo fuori in alto a destra) che finirebbero
+  // DAVANTI al cubo ("il cubo insegue la scia").
+  const TRAIL_N = 14; // come TRAIL_LENGTH in-game
+  const TRAIL_DT = 0.016; // come TRAIL_INTERVAL in-game
+  const phaseNow = menuTime % T;
+  for (let i = TRAIL_N; i >= 1; i--) {
+    const pe = phaseNow - i * TRAIL_DT;
+    if (pe < 0) continue;
+    const pp = pe / T;
     let ex, ey;
     if (pp < jumpAt) {
       ex = startX + (jumpX - startX) * (pp / jumpAt);
@@ -1320,10 +1334,11 @@ function drawHomeCube() {
       ex = jumpX + (LOGICAL_WIDTH + 200 - jumpX) * kk;
       ey = groundY - Math.sin(kk * Math.PI) * (LOGICAL_HEIGHT * 0.42) - kk * LOGICAL_HEIGHT * 0.55;
     }
+    const t = 1 - i / (TRAIL_N + 1); // 0 (coda) .. ~1 (vicino al cubo)
     ctx.save();
-    ctx.globalAlpha = 0.1 * (1 - i / 7); // scia più tenue (sullo sfondo)
+    ctx.globalAlpha = 0.1 * t; // tenue, sullo sfondo (stile invariato)
     ctx.fillStyle = TRAIL_CUBE_COLOR;
-    const s = size * (0.5 + (1 - i / 7) * 0.4);
+    const s = size * (0.5 + t * 0.4);
     ctx.fillRect(ex + size / 2 - s / 2, ey + size / 2 - s / 2, s, s);
     ctx.restore();
   }
@@ -1341,6 +1356,7 @@ function drawHomeCube() {
     ctx.fillRect(-size / 2, -size / 2, size, size);
   }
   ctx.restore();
+  ctx.restore(); // chiude la scala ancorata al pavimento
 }
 
 // Lascia la pre-home: nasconde l'input, avvia il jingle del fake loader ed entra
@@ -1538,10 +1554,11 @@ function drawHome() {
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
   ctx.fillRect(renderer.extLeft, renderer.extTop, renderer.extRight - renderer.extLeft, renderer.extBottom - renderer.extTop);
 
-  pushUiScale(); // UI/cubo ingranditi su mobile (sfondo+vela sopra a piena vista)
-
-  // Cubo decorativo che corre e salta in loop (sopra lo sfondo, sotto la UI).
+  // Cubo decorativo: scalato come la UI ma ANCORATO al pavimento (pivot su FLOOR_Y,
+  // vedi drawHomeCube), così resta incollato alla linea di terra a ogni risoluzione.
   drawHomeCube();
+
+  pushUiScale(); // UI ingrandita su mobile (sfondo+vela sopra a piena vista)
 
   // Logo centrato in alto (proporzioni native), dimensione contenuta.
   if (LOGO_IMG.ready) {
@@ -1788,7 +1805,14 @@ function drawOptions() {
 // Rettangolo cliccabile della freccia "indietro" (in alto a sinistra), condiviso
 // tra le schermate di menu (players/levels/options/stats).
 function backArrowRect() {
-  return { x: 40, y: 40, w: 70, h: 58 };
+  // Garantiamo che — DOPO la scala-attorno-al-centro di pushUiScale (entro cui la
+  // freccia è disegnata E testata) — il bordo superiore resti sotto la safe-area.
+  // top disegnato = cy + (y-cy)*s  ⇒  y >= cy + (safeTop+pad - cy)/s.
+  const s = uiScale();
+  const pad = 20;
+  const cy = LOGICAL_HEIGHT / 2;
+  const yMin = cy + (renderer.safeTop + pad - cy) / s;
+  return { x: 40, y: Math.max(40, yMin), w: 70, h: 58 };
 }
 // Alias storico usato da STATS.
 function statsBackRect() {
@@ -2297,7 +2321,7 @@ function topHudLayout() {
     pause: { cx: renderer.safeRight - m - pauseR, cy, r: pauseR },
     coinR,
     coinGap: 8 * s, // icona ↔ testo monete
-    pauseGap: 18 * s, // testo monete ↔ anello pausa
+    pauseGap: 36 * s, // testo monete ↔ anello pausa (più aria dal tasto pausa)
   };
 }
 

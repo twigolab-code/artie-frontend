@@ -94,16 +94,16 @@ export const ROCKET_SPEED_LINE_COLOR = '#b8a6ff'; // linee di velocità (warp)
 
 // --- Livelli (dati-driven): sfondo, pavimento, temi, difficoltà, mappa --------
 // `bg`/`floor` = stile sfondo/pavimento; `cube`/`ship` = temi colore (vira ai
-// portali); `scrollSpeed` = difficoltà; `mapKey` = quale mappa in data/;
-// `diffFrac` = riempimento [0,1] della barra difficoltà nel menu.
-// 5 livelli giocabili: City (bg procedurale 'city') · Los Angeles + Metro +
-// Car Wash + Boulevard (bg immagine 'losangeles'). Metro/Car Wash/Boulevard sono
-// per ora duplicati della mappa skyline, da differenziare in seguito.
+// portali); `scrollSpeed` = pace (uguale 630 per tutti); `mapKey` = quale mappa in
+// data/; `diff`/`diffFrac` = etichetta + riempimento [0,1] della barra difficoltà.
+// 5 livelli giocabili con mappe DISTINTE e a difficoltà CRESCENTE (geometria, non
+// velocità): 1 City (Facile) · 2 Car Wash · 3 Los Angeles · 4 Boulevard ·
+// 5 Metro (Difficile). Ogni mappa ha una meccanica firma (vedi i file in data/).
 export const LEVELS = [
   {
     id: 'city',
     name: 'City',
-    diff: 'Medio',
+    diff: 'Facile', // L1: il piu facile (verticalita dolce, razzo subito)
     bg: 'city', // skyline procedurale
     floor: 'city',
     cube: LA_CUBE, // riusa i temi colore esistenti
@@ -111,25 +111,25 @@ export const LEVELS = [
     obstacleBottom: '#8a1410', // bottom gradiente ostacoli coerente col floor rosso
     scrollSpeed: 630,
     mapKey: 'skyline',
-    diffFrac: 0.55,
+    diffFrac: 0.30,
   },
   {
     id: 'carwash',
     name: 'Car Wash',
-    diff: 'Medio',
+    diff: 'Medio', // L2: tower hopping, razzo presto
     bg: 'carwash', // sfondo immagine wash.webp (loop)
     floor: 'carwash', // asfalto scuro + bordo rosso neon
     cube: LA_CUBE,
     ship: LA_SHIP,
     obstacleBottom: '#9a1414', // rosso neon scuro, coerente col bordo neon dell'asfalto
     scrollSpeed: 630,
-    mapKey: 'carwash', // duplicato di skyline (da modificare)
-    diffFrac: 0.55,
+    mapKey: 'carwash',
+    diffFrac: 0.45,
   },
   {
     id: 'losangeles',
     name: 'Los Angeles',
-    diff: 'Medio',
+    diff: 'Medio', // L3: catene aeree + 1o tunnel + pad, ship a meta
     bg: 'losangeles', // sfondo immagine LA.webp (loop)
     floor: 'la', // passeggiata viola
     cube: LA_CUBE,
@@ -137,33 +137,33 @@ export const LEVELS = [
     obstacleBottom: '#8a3a12', // ambra/arancio scuro, coerente col tramonto LA
     scrollSpeed: 630,
     mapKey: 'skyline2',
-    diffFrac: 0.55,
+    diffFrac: 0.60,
   },
   {
     id: 'boulevard',
     name: 'Boulevard',
-    diff: 'Medio',
+    diff: 'Difficile', // L4: catena orb + torri alte, ship tardi
     bg: 'boulevard', // sfondo immagine boulevard.webp (loop)
     floor: 'boulevard', // strada azzurra ad assi
     cube: LA_CUBE,
     ship: LA_SHIP,
     obstacleBottom: '#143a6a', // blu scuro, coerente col floor azzurro
     scrollSpeed: 630,
-    mapKey: 'boulevard', // duplicato di skyline (da modificare)
-    diffFrac: 0.55,
+    mapKey: 'boulevard',
+    diffFrac: 0.78,
   },
   {
     id: 'metro',
     name: 'Metro',
-    diff: 'Medio',
+    diff: 'Difficile', // L5: il piu difficile (tutto insieme, ship finale)
     bg: 'metro', // sfondo immagine metro.webp (loop)
     floor: 'metro', // banchina viola chiaro
     cube: LA_CUBE,
     ship: LA_SHIP,
     obstacleBottom: '#241a52', // indaco/viola scuro, coerente con la banchina viola
     scrollSpeed: 630,
-    mapKey: 'metro2', // duplicato di skyline (da modificare)
-    diffFrac: 0.55,
+    mapKey: 'metro2',
+    diffFrac: 0.95,
   },
 ];
 

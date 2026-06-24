@@ -1,288 +1,192 @@
 // =============================================================================
-// skyline — livello MEDIO costruito a SEGMENTI sulla geometria verificata @585
-// (vedi level2.js): salto cubo apice ~2.8 tile / gittata ~5.2; orb = salto
-// fresco a mezz'aria (orb a riga 7); pad apice ~6.4 / gittata ~8; pavimento
-// spinato `s` a riga 9 tra blocchi d'appoggio.
+// skyline (City) — Livello 1: il piu FACILE. Verticalita dolce in stile GD:
+// scale aeree (gradini +1/+2), un orb, hop su cubi singoli. Razzo SUBITO, breve.
+// Densita minima (max 2 hazard a terra contigui), niente pad/tunnel/catene.
 //
-// Legenda (vedi config.js): 0 vuoto, 1 blocco (ci salti SOPRA; lato/sotto =
-// morte), 2 spuntone, 3 portale-ship, 4 portale-cube, 5 orb, 6 spuntone piccolo,
+// Legenda (config.js): 0 vuoto, 1 blocco (ci salti SOPRA; lato/sotto = morte),
+// 2 spuntone, 3 portale-ship, 4 portale-cube, 5 orb, 6 spuntone piccolo,
 // 7 spuntone capovolto (soffitto), 8 pad, 9 moneta, s pavimento spinato.
+// Griglia 12 righe; riga 9 = terra; 8 = +1, 7 = +2, 6 = +3 (orb/pad), 5 = +4.
 //
-// Griglia 12 righe (riga 0 in alto). Pavimento render = righe 10-11. Ostacoli e
-// piattaforme "a terra" sulla RIGA 9. Quote: 9 = terra, 8 = +1, 7 = +2, 6 = +3.
-//
-// REGOLE skyline (piu rigide del default): MAX 3 ostacoli a terra contigui
-// (2/6/s) per ogni salto; pavimento spinato CORTO (1-2 celle) e frequente tra
-// blocchi/piattaforme; sviluppo VERTICALE con blocchi e piattaforme in aria su
-// cui saltare (righe 8 = +1, 7 = +2, raggiungibili; +3 solo con orb/pad).
-//
-// CURVA: lead-in -> riscaldamento -> scala aerea -> orb -> hop su blocchi sopra
-// spinato -> pad+piattaforma -> catena di piattaforme aeree -> spinato frequente
-// -> sezione ship -> rientro orb+blocco -> picco (<=3 contigui) -> cool-down.
-// 5 monete opzionali (cap motore COINS_PER_LEVEL = 5).
+// Geometria @630 (engine-verified): salto cubo apice ~2.98 tile, gittata ~5.77;
+// atterraggio max +2 tile (piattaforma vicina); +3 solo con orb in salita; pad
+// apice ~6.7. Blocco = cella piena a qualsiasi riga (lati/sotto letali) -> torri
+// scalabili via gradini. Ship: soffitto schermo (riga 0) = morte; 7 e 2 mai
+// sulla stessa colonna; corridoio aperto, righe 0-1 libere.
 // =============================================================================
 import { gap, assemble } from './_grid.js';
 
-// --- Segmenti --------------------------------------------------------------
+// --- Lead-in + warm-up -----------------------------------------------------
+const start = gap(7);
 
-// (1) Lead-in sicuro: qualche tile pulita prima del primo ostacolo.
-const start = gap(8);
-
-// (2) Riscaldamento: spuntoni singoli distanziati + un blocco 1-tall da
-// scavalcare. Insegna il timing del salto.
+// Warm-up: spuntone piccolo + un blocco 1-tall da scavalcare (1 hazard).
 const warmup = [
-  '000000000000000000000000',
-  '000000000000000000000000',
-  '000000000000000000000000',
-  '000000000000000000000000',
-  '000000000000000000000000',
-  '000000000000000000000000',
-  '000000000000000000000000',
-  '000000000000000000000000',
-  '000000000000000000000000',
-  '000200000600000100000200', // spuntone, piccolo, blocco (hop), spuntone
-  '000000000000000000000000',
-  '000000000000000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00060000010000',
+  '00000000000000',
+  '00000000000000',
 ];
 
-// (3) NUOVO — Scala AEREA: blocco a terra -> +1 -> +2, poi corsa piatta in aria
-// (si salta di blocco in blocco) e ridiscesa a gradino. Sviluppo verticale.
-// MONETA 1 sulla cima della corsa aerea (+2). Ogni gradino <=2 e <=5 di distanza.
+// --- Razzo SUBITO ----------------------------------------------------------
+// Portale ship a terra in corsia aperta (nessun soffitto che forzi il cubo).
+const funnelShip = [
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000003000000',
+  '00000000000000',
+  '00000000000000',
+];
+
+const shipEntryBuffer = gap(6);
+
+// Corridoio ship corto e arioso: 7 e 2 sfalsati (mai stessa colonna), righe 0-1
+// libere, corridoio righe 3-8 aperto. MONETA 1.
+const flightEasy = [
+  '0000000000000000000000000000',
+  '0000000000000000000000000000',
+  '0000070000000700000007000000', // soffitto 7 a col5, col13, col21
+  '0000000000000000000000000000',
+  '0000000000009000000000000000', // MONETA 1 (col12) corridoio aperto
+  '0000000000000000000000000000',
+  '0000000000000000000000000000',
+  '0000000000000000000000000000',
+  '0000000000000000000000000000',
+  '0000000002000000020000000200', // terra 2 a col9, col17, col25 (sfalsati)
+  '0000000000000000000000000000',
+  '0000000000000000000000000000',
+];
+
+const shipExitBuffer = gap(4);
+
+// Portale cube in camera aperta: sotto vuoto -> caduta a terra sicura.
+const funnelCube = [
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000004000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+  '00000000000000',
+];
+
+const postPortalGap = gap(5);
+
+// --- Verticalita a cubo (dolce) --------------------------------------------
+// Scala aerea: pilastri solidi a gradini terra->+1->+2, poi discesa +2->+1->terra.
+// Si atterra sempre sul TOP di ogni pilastro (lati letali ma si sale a gradini).
+// MONETA 2 sopra la cima (+2).
 const airStairs = [
   '0000000000000000000000',
   '0000000000000000000000',
   '0000000000000000000000',
   '0000000000000000000000',
   '0000000000000000000000',
+  '0000000009000000000000', // MONETA 2 (col9) sopra la cima +2
   '0000000000000000000000',
-  '0000000000090000000000', // MONETA 1 sopra la corsa aerea (riga 6, +3 sull'arco)
-  '0000000011111000000000', // +2: corsa aerea piatta (col 8-12)
-  '0000011100000011000000', // +1: gradino di salita (col 5-7) e di discesa (col 14-15)
-  '0011100000000000111000', // terra: blocco di partenza (col 2-4) e d'arrivo (col 16-18)
-  '0000000000000000000000',
-  '0000000000000000000000',
-];
-
-// (4) ORB: torre di 2 blocchi con orb a riga 7 una colonna prima. Si salta + orb
-// per scavalcare (oppure si atterra sulla cima a +2). MONETA 2 sull'arco dell'orb.
-const orbIntro = [
-  '00000000000000000',
-  '00000000000000000',
-  '00000000000000000',
-  '00000000000000000',
-  '00000000090000000', // MONETA 2 (col 8) sull'apice dell'orb
-  '00000000000000000',
-  '00000000000000000',
-  '00005000000000000', // ORB col 4, riga 7 (una colonna prima della faccia)
-  '00000110000000000', // torre 2-tall, cima (col 5-6)
-  '00000110000000000', // base a terra
-  '00000000000000000',
-  '00000000000000000',
-];
-
-// (5) NUOVO — Hop su BLOCCHI sopra pavimento spinato CORTO: coppie di blocchi
-// 2-wide (cima d'appoggio +1) separate da una sola cella di `s` a terra. Il cubo
-// salta di blocco in blocco; cadere corto = spinato. Distanze cima-cima ~3 tile.
-const blockHopSpikes = [
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0011000110001100011', // cime d'appoggio +1 (coppie di blocchi)
-  '0011s0011s0011s0011', // base + 1 cella `s` tra le coppie (corto e frequente)
-  '0000000000000000000',
-  '0000000000000000000',
-];
-
-// (6) PAD verso piattaforma alta e larga (+4, solo col pad). MONETA 3 sopra. Poi
-// una piattaforma aerea piu bassa (+2) su cui atterrare in discesa, e un gradino.
-const padIntro = [
-  '0000000000000000000000000000',
-  '0000000000000000000000000000',
-  '0000000000000000000000000000',
-  '0000000009000000000000000000', // MONETA 3 sopra la piattaforma alta
-  '0000000011111000000000000000', // piattaforma alta e larga (+4: col pad)
-  '0000000000000000000000000000',
-  '0000000000000000000000000000',
-  '0000000000000000011110000000', // piattaforma aerea +2 (atterraggio in discesa)
-  '0000000000000000000000000000',
-  '0008000000000000000000011000', // PAD col 3; gradino d'arrivo (col 24-25)
-  '0000000000000000000000000000',
-  '0000000000000000000000000000',
-];
-
-// (7) NUOVO — Catena di PIATTAFORME AEREE: piattaforme a +1/+2 con UNA cella di
-// `s` a terra sotto i varchi (un salto corto = spinato). Si salta di piattaforma
-// in piattaforma. MONETA 4 a meta catena, sull'arco tra due piattaforme.
-const floatChain = [
-  '0000000000000000000000000',
-  '0000000000000000000000000',
-  '0000000000000000000000000',
-  '0000000000000000000000000',
-  '0000000000009000000000000', // MONETA 4 a meta catena (riga 4)
-  '0000000000000000000000000',
-  '0000000000000000000000000',
-  '0000000011100000011100000', // piattaforme +2 (col 8-10, col 17-19)
-  '0011100000000000000000111', // piattaforme +1 (ingresso col 2-4, uscita col 22-24)
-  '0000000s00000s00000s00000', // `s` corti a terra sotto i varchi (1 cella)
-  '0000000000000000000000000',
-  '0000000000000000000000000',
-];
-
-// (8) Spinato FREQUENTE: blocchi singoli a terra separati da `s` corti (1 cella).
-// Il cubo continua a saltare blocco -> oltre `s` -> blocco. Max 1 `s` contiguo.
-const spikeHops = [
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0000000000000000000',
-  '0010s0010s0010s0010', // blocco, s, blocco, ... (s corto e frequente)
-  '0000000000000000000',
-  '0000000000000000000',
-];
-
-// (9a) Imbuto verso SHIP: soffitto a gradini che incanala il cubo nel portale (3)
-// all'altezza del terreno (riusato dal design verificato di level2).
-const funnelShip = [
-  '00000000000000',
-  '00000000011111',
-  '00000000111111',
-  '00000001111111',
-  '00000011111111',
-  '00000111111111',
-  '00000111111111',
-  '00000000000000',
-  '00000000000000',
-  '00000000300000', // PORTALE SHIP
-  '00000000000000',
-  '00000000000000',
-];
-
-// (9b) Tunnel ship: spuntoni a soffitto (7) e a terra (2) RADI e SFALSATI, mai
-// affacciati -> corridoio centrale sempre aperto. MONETA 5 a mezza altezza in
-// spazio libero. Buffer iniziale e finale senza ostacoli. Allungato per durata.
-const flight = [
-  '000000000000000000000000000000000000000000',
-  '000000000000000000000000000000000000000000',
-  '000007000000000007000000000000007000000000', // spuntoni a soffitto (radi)
-  '000000000000000000000000000000000000000000',
-  '000000000000009000000000000000000000000000', // MONETA 5 (riga 4) corridoio aperto
-  '000000000000000000000000000000000000000000',
-  '000000000000000000000000000000000000000000',
-  '000000000000000000000000000000000000000000',
-  '000000000000000000000000000000000000000000',
-  '000000020000000000020000000000200000000000', // spuntoni a terra (radi, sfalsati)
-  '000000000000000000000000000000000000000000',
-  '000000000000000000000000000000000000000000',
-];
-
-// (9c) Imbuto verso CUBE: camera libera attorno al portale (4) cosi la
-// trasformazione avviene nello spazio aperto (riusato dal design verificato).
-const funnelCube = [
-  '0000000000000000000000',
-  '0000000011100000011111',
-  '0000000111000000011111',
-  '0000001110000000001111',
-  '0000011100000000001111',
-  '0000011000000000000111',
-  '0000000000000000000000',
-  '0000000000400000000000', // PORTALE CUBE
-  '0000000000000000000000',
-  '0000011000000000000111',
+  '0000000111100000000000', // +2: cima della scala (col 7-10)
+  '0000011111100110000000', // +1: gradino salita (col 5-6) ... e gradino discesa (col 13-14)
+  '0011111111100110000000', // terra: base scala (col 2-10) + base gradino discesa
   '0000000000000000000000',
   '0000000000000000000000',
 ];
 
-// (10) NUOVO — Rientro: orb a riga 7 che porta su un blocco aereo (+2) su cui
-// atterrare, poi gradino di discesa. Riprende il flusso a cube con verticalita.
-const returnCombo = [
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00005000011100000000', // ORB col 4 (riga 7) -> blocco aereo +2 (col 9-11)
-  '00000000000000110000', // gradino +1 di discesa (col 14-15)
-  '00000000000000000000', // sotto e vuoto: si salta dall'orb al blocco aereo
-  '00000000000000000000',
-  '00000000000000000000',
+const gapA = gap(5);
+
+// Orb + torre 2-tall: orb a riga 7 una colonna prima; si atterra sulla cima (+2)
+// o si fa orb per scavalcare. MONETA 3 sull'arco dell'orb.
+const orbTower = [
+  '00000000000000000',
+  '00000000000000000',
+  '00000000000000000',
+  '00000000000000000',
+  '00000000090000000', // MONETA 3 (col8) sull'arco
+  '00000000000000000',
+  '00000000000000000',
+  '00005000000000000', // ORB col4 (riga 7) una colonna prima della torre
+  '00000110000000000', // torre cima (col5-6) +2
+  '00000110000000000', // torre base a terra
+  '00000000000000000',
+  '00000000000000000',
 ];
 
-// (11) PICCO (<=3 contigui): torre+orb, poi campo jagged ricostruito in TERZINE
-// (626 / 226) separate da varchi >=2 tile. Nessuna run supera 3. Combo serrata
-// ma leale; nessuna moneta qui (cap 5 gia raggiunto).
-const peakCombo = [
-  '00000000000000000000000000',
-  '00000000000000000000000000',
-  '00000000000000000000000000',
-  '00000000000000000000000000',
-  '00000000000000000000000000',
-  '00000000000000000000000000',
-  '00000000000000000000000000',
-  '00000500000000000000000000', // ORB col 5 (riga 7) prima della torre
-  '00000011000000000000000000', // torre 2-tall, faccia sx col 6
-  '00000011000626000226000000', // base torre + terzine (varchi >=2 tra i gruppi)
-  '00000000000000000000000000',
-  '00000000000000000000000000',
+const gapB = gap(5);
+
+// Hop su 2 cubi singoli (+1) sopra un `s` corto (1 cella). MONETA 4 tra i due.
+const singleHops = [
+  '0000000000000000000000',
+  '0000000000000000000000',
+  '0000000000000000000000',
+  '0000000000000000000000',
+  '0000000000090000000000', // MONETA 4 (col10) sull'arco tra i cubi
+  '0000000000000000000000',
+  '0000000000000000000000',
+  '0000000000000000000000',
+  '0000011000001100000000', // cubo +1 (col5-6), cubo +1 (col12-13)
+  '0000011000s01100000000', // base + `s` (col10) sotto il varco
+  '0000000000000000000000',
+  '0000000000000000000000',
 ];
 
-// (12) Cool-down: due spuntoni singoli distanziati (un salto comodo ciascuno),
-// poi finale pulito senza ostacoli.
-const cooldown = [
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00000000000000000000',
-  '00002000000020000000', // due spuntoni singoli distanziati
-  '00000000000000000000',
-  '00000000000000000000',
+const gapC = gap(5);
+
+// Picco gentile: due spuntoni singoli ben distanziati, poi (dopo terra libera)
+// una scaletta +1 -> +2 su cui salire. MONETA 5 sopra la cima. Nessuna run > 1.
+const gentlePeak = [
+  '000000000000000000000000',
+  '000000000000000000000000',
+  '000000000000000000000000',
+  '000000000000000000000000',
+  '000000000000000009000000', // MONETA 5 (col17) sopra la cima +2
+  '000000000000000000000000',
+  '000000000000000000000000',
+  '000000000000000111100000', // +2: cima (col15-18)
+  '000000000000011111100000', // +1: gradino (col13-14) + corpo
+  '000200000200011111100000', // spuntoni (col3,col9) + scaletta a terra (col13-18)
+  '000000000000000000000000',
+  '000000000000000000000000',
 ];
+
+const finish = gap(12);
 
 // --- Assemblaggio ----------------------------------------------------------
 const map = assemble(
   start,
   warmup,
-  gap(5),
-  airStairs,
-  gap(5),
-  orbIntro,
-  gap(5),
-  blockHopSpikes,
-  gap(5),
-  padIntro,
-  gap(5),
-  floatChain,
-  gap(5),
-  spikeHops,
-  gap(5),
-  funnelShip,
-  gap(2),
-  flight,
-  gap(2),
+  gap(4),
+  funnelShip, // razzo presto
+  shipEntryBuffer,
+  flightEasy, // corridoio + MONETA 1
+  shipExitBuffer,
   funnelCube,
-  gap(5),
-  returnCombo,
-  gap(5),
-  peakCombo,
-  gap(5),
-  cooldown,
-  gap(10)
+  postPortalGap,
+  airStairs, // scala aerea + MONETA 2
+  gapA,
+  orbTower, // orb + torre + MONETA 3
+  gapB,
+  singleHops, // hop su cubi singoli + MONETA 4
+  gapC,
+  gentlePeak, // picco gentile + MONETA 5
+  finish
 );
 
 export const skyline = map;

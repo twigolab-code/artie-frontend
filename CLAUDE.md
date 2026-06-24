@@ -180,9 +180,12 @@ src/
 - **Back navigation:** a shared "indietro" arrow (`backArrowRect()` + `arrow(rect,-1)`, top-left) is
   drawn and hit-tested on `players`/`levels`/`options`/`stats` → returns to `home`. On `levels`/`players`
   the arrow is checked first (priority over "click = play"/select).
-- **Persistence (localStorage):** `gd_audio` (music/sfx/muted; fresh-install default 50%/50%/unmuted),
-  `gd_bestCoins` (per-level coin record), `gd_levelStats` (per-level bestPct/attempts/jumps),
-  `gd_nickname` (player nickname).
+- **Persistence (localStorage):** `gd_bestCoins` (per-level coin record), `gd_levelStats`
+  (per-level bestPct/attempts/jumps), `gd_nickname` (player nickname). **Audio is NOT persisted:**
+  it ALWAYS starts ON at 50%/50% unmuted on every launch (desktop + mobile). `getSettings()` returns
+  the config defaults (`MUSIC_VOLUME`/`SFX_VOLUME`/false) ignoring localStorage; `saveSettings()` is a
+  no-op; `init()` clears any legacy `gd_audio` key. Options volume/mute changes apply to the current
+  session only and are not remembered.
 - **Backgrounds registry:** procedural `BACKGROUNDS = { neon, city, la }` + image backgrounds built
   lazily in `getBg(key)` from `IMG_BG = { losangeles:'LA', metro:'metro', carwash:'wash',
   boulevard:'boulevard' }` (each an `ImageBackground` tiling its WebP in a slow horizontal loop,
@@ -233,8 +236,8 @@ Velocities are scaled ×1.30 and gravity ×1.69 vs. an earlier "slow" baseline (
   `main.js render` → `level.render(…, fillBottom)` → `obstacle.render` (`_renderBlock`/`_renderSpike`,
   default `OBSTACLE_FILL_BOTTOM` if absent); the same color also feeds the cube's **vector fallback**
   in `Player._renderCube` (the PNG skin is unaffected). `_renderSpikeFloor` keeps its black/ice look.
-- **Audio:** `BPM = 128`, `MUSIC_VOLUME = 0.5` / `SFX_VOLUME = 0.5` (fresh-install defaults: both ON
-  at 50%, unmuted; saved `gd_audio` overrides them for returning players), and
+- **Audio:** `BPM = 128`, `MUSIC_VOLUME = 0.5` / `SFX_VOLUME = 0.5` (the audio ALWAYS starts at these
+  values, ON at 50%, unmuted, on EVERY launch — not persisted; see §4 Persistence), and
   `MUSIC_TRACKS = { home: '/home.m4a', game: '/game.mp3' }` — the looped background tracks (drop the
   files in `public/`; menus play `home`, levels play `game` via `audio.setTrack`; if absent, the
   synth beat plays instead). `SFX_FILES = { 'tag-artie', 'tag-miles', 'death-artie', loader }`
@@ -275,30 +278,40 @@ Velocities are scaled ×1.30 and gravity ×1.69 vs. an earlier "slow" baseline (
 | `8` | pad — ground-only, cube-only, big auto-bounce |
 | `9` | coin — collectible, **max 5 per level**, always optional |
 
-## 7. Level design rules (geometry verified at speed 585; levels now run at 630)
-The jump/range numbers below were simulator-verified at **585**; all levels now use
-`scrollSpeed: 630` (+8% feel). The arcs are unchanged (physics isn't tied to scroll speed),
-so the 585-verified rules remain the design baseline — just slightly tighter timing at 630.
-From the simulator-verified headers in `level2.js` / `skyline.js`:
-- Cube jump apex **~2.8 tiles**, horizontal range **~5.2 tiles**.
-- Orb = a fresh mid-air jump; **place orbs at row 7** (touchable on the rising arc).
-- Pad apex **~6.4 tiles**, range **~8** (for tall platforms).
-- **Max 4 contiguous ground hazards** (`2`/`6`/`s` combined) per single jump; for 5+, break with a
-  block to stand on, a mid-air orb, or a pad.
-- Every horizontal gap the cube must clear **≤ 5 tiles**; the landing is always a `1`-top or
-  ground — **never a hazard**.
-- Climb **≤ 2 tiles** above current footing (≤ 3 only with an orb in the ascent; taller needs a pad).
-- Towers must be scalable (approached so the player lands on top — never into a lethal side).
-- Ship sections open with `3`, close with `4`; keep a continuous open corridor between floor (`2`)
-  and ceiling (`7`) spikes (ceiling is lethal — never force the player into it). No pad inside a ship section.
+## 7. Level design rules (geometry engine-verified @ scrollSpeed 630)
+The numbers below are derived directly from `config.js` physics at the current **`scrollSpeed: 630`**
+(all 5 levels). Verify any map edit with `node scripts/check-levels.mjs` (invariant checks + a
+cube-physics **playability simulator** that proves a survivable path exists — see end of §9).
+- Cube jump apex **~2.98 tiles**, horizontal range **~5.77 tiles**.
+- **Landing on a higher platform: max `+2` tiles** (near edge ~1–3 tiles ahead). **`+3` is NOT
+  reachable by a plain jump** — needs an **orb in the ascent** or a **pad**.
+- Orb (`5`) = a fresh full jump from the touch point (another ~2.98 apex); **orbs chain** (re-arm on
+  exit) so you can climb high with 2–3 orbs. Place each on the rising arc (~row 7, then ~row 5/4).
+- Pad (`8`) apex **~6.7 tiles** (cube-only) — for tall towers/platforms (≤ `+6`, i.e. row 3).
+- **Max 4 contiguous ground hazards** (`2`/`6`/`s`) per single jump (range 5.77 clears 4); separate
+  groups with **flat ground** (≥ a couple of tiles) — NOT with a ground-level block (its side is lethal).
+- Every horizontal gap the cube must clear **≤ 5 tiles**; the landing is always a `1`-top or ground —
+  **never a hazard, never a block's side**.
+- **Blocks (`1`) are full solid cells at ANY row** — top = land, **sides & underside = death**. So:
+  - **Towers/staircases**: build as solid pillars climbed step-by-step (`+1`→`+2`, then `+1` onto a
+    `+3`). The player must reach the **top via the staircase**; never leave a ground-running cube
+    aimed at a lethal side. Keep ≥ ~5 flat tiles between a hazard run and a tower face so the cube can
+    land and re-jump (a tight spike-then-wall combo is a forced death — the simulator catches it).
+  - **Floating hop cubes**: a single `1` at row 7 (`+2`) with **empty cells below** lets a ground cube
+    run *under* it safely and jump *onto* it for verticality (no ground-level side to crash into).
+  - **Tunnels/corridors**: a block ceiling at rows ~1–4 with open **headroom** below (rows ~5–9) — the
+    cube runs underneath; jumping into the ceiling underside = death, so any required jump in a tunnel
+    must stay clear of the ceiling (a plain jump rises ~3 tiles).
+- Climb **≤ 2 tiles** per single jump (≤ 3 only with an orb in the ascent; taller via pad).
+- Ship sections open with `3`, close with `4`; keep a continuous open corridor — floor (`2`) and
+  ceiling (`7`) spikes **must never share a column**, rows **0–1 stay clear** (top of screen y≤0 =
+  instant death), and any in-corridor blocks must leave **≥ ~4 rows** of open vertical passage. No pad
+  in a ship section. Buffer (empty `gap`) right before/after both portals.
 - Safe buffer (~1 tile) right after every portal, pad launch, and orb-clear landing.
-- Coins are always optional and reachable within jump/orb/pad limits.
-- **Verticality** (used in `skyline`): air blocks/platforms at row 8 (+1) and row 7 (+2) are
-  jump-reachable from the ground or from another block top, provided the vertical step ≤2 tiles
-  and the horizontal center-to-center gap ≤5. Build air "stairs" (+1 then +2) and flat air runs to hop across.
-- **Short spiked floor** (used in `skyline`): prefer **1-cell `s`** placed frequently between blocks
-  / under platform gaps (block→over-`s`→block) rather than one long `ssss` strip. Each `s` cell still
-  counts toward the ≤3 (skyline) / ≤4 (default) contiguous-hazard limit.
+- Coins (`9`): **exactly 5 per level** (engine cap), always optional and reachable within jump/orb/pad
+  limits. **Rows 10–11 are floor-render only — keep them all `0`** (a tile there is a phantom block).
+- **Short spiked floor**: prefer **1-cell `s`** placed frequently under platform gaps
+  (block→over-`s`→block) rather than one long `ssss` strip. Each `s` counts toward the contiguous-hazard limit.
 
 ## 8. How to add a new level
 1. **Data file** `src/data/<name>.js`:
@@ -328,19 +341,38 @@ From the simulator-verified headers in `level2.js` / `skyline.js`:
    `mapKey` must match both the `data/` export and the `MAPS` key.
 
 ## 9. Current content
-All 5 levels are playable, `diff: 'Medio'`, `scrollSpeed: 630`, themes `LA_CUBE/LA_SHIP`. Each level
-sets a per-level `obstacleBottom` (bottom color of the spike/block gradient, coherent with its bg;
-the top stays near-black `OBSTACLE_FILL_TOP`). Carousel order: City · Car Wash · Los Angeles ·
-Boulevard · Metro. Levels other than City/LA are **placeholder copies of the `skyline` map**
-(to be differentiated later).
+All 5 levels are playable, **`scrollSpeed: 630` (same for all — difficulty rises via geometry, NOT
+speed)**, themes `LA_CUBE/LA_SHIP`. Each level sets a per-level `obstacleBottom` (bottom color of the
+spike/block gradient, coherent with its bg; top stays near-black `OBSTACLE_FILL_TOP`). Carousel order =
+difficulty order: City · Car Wash · Los Angeles · Boulevard · Metro.
 
-| # | id | name | mapKey | bg | floor | notes |
-|---|----|------|--------|----|----|-------|
-| 1 | city | City | `skyline` | `city` | `city` | longer, vertical, **max 3 contiguous hazards** (stricter than the global ≤4) |
-| 2 | losangeles | Los Angeles | `skyline2` | `losangeles` (LA.webp) | `la` | copy of `skyline`; image bg looped, sky-only |
-| 3 | metro | Metro | `metro2` | `metro` (metro.webp) | `metro` | copy of `skyline` (to be modified) |
-| 4 | carwash | Car Wash | `carwash` | `carwash` (wash.webp) | `carwash` | copy of `skyline` (to be modified) |
-| 5 | boulevard | Boulevard | `boulevard` | `boulevard` (boulevard.webp) | `boulevard` | copy of `skyline` (to be modified) |
+**Map design — DISTINCT maps with a difficulty RAMP and real GD-style verticality.** Each map has its
+own signature mechanic (towers, aerial chains, tunnels, orb chains, pad launches) and a different
+segment order — no two are the same, and they are **no longer copies of `skyline`**. The ship section
+is **early in the easy levels and later/longer in the hard ones** (L1–L2 ship ~tile 32; L3 mid; L4 late;
+L5 a long finale). Difficulty knobs (all per-level data, speed unchanged): obstacle density, climb
+height, tunnel length, number of orb/pad chains, contiguous-hazard count (1 → 4), and `diff`/`diffFrac`
+in `config.js` (Facile 0.30 → Difficile 0.95). Exactly **5 optional coins** per level.
+
+**Always validate a map edit** with `node scripts/check-levels.mjs` (no test harness in the repo). It
+runs, for every map: (1) **invariant checks** — every segment row same width; exactly 5 `9`; no column
+with both `7` and `2`; rows 0–1 free of spikes/items; rows 10–11 empty; first `4` after first `3`; ≤4
+contiguous ground hazards; no spike on a block top — AND (2) a **cube-physics playability simulator**
+(BFS over jump timings through the cube sections, auto-passing ship zones and auto-using pads/orbs)
+that PROVES a survivable path exists end-to-end. The simulator is what catches forced-death traps the
+eye misses (e.g. a hazard run too close to a tower face — keep ≥ ~5 flat tiles between them). It mirrors
+the @630 constants from `config.js`; keep it in sync if physics change. Then `npm run dev` to feel-check.
+
+| # | id | name | mapKey | bg | floor | diff | signature mechanic |
+|---|----|------|--------|----|----|----|-------|
+| 1 | city | City | `skyline` | `city` | `city` | Facile | gentle: air-stairs + 1 orb + single-cube hops, ship early, ≤1 hazard |
+| 2 | carwash | Car Wash | `carwash` | `carwash` (wash.webp) | `carwash` | Medio | tower hopping (staircase towers) + orb→`+3` + 3-cube chain, ship early |
+| 3 | losangeles | Los Angeles | `skyline2` | `losangeles` (LA.webp) | `la` | Medio | aerial chain + **first tunnel** + **pad**→`+4`, ship at mid, ≤3 |
+| 4 | boulevard | Boulevard | `boulevard` | `boulevard` (boulevard.webp) | `boulevard` | Difficile | **2-orb chain** + tall `+3` towers + longer tunnel, ship late, ≤4 once |
+| 5 | metro | Metro | `metro2` | `metro` (metro.webp) | `metro` | Difficile | everything: **3-orb chain**, pad→`+6`, dense `2262` runs, long tunnel, **ship finale** |
+
+(Note carousel/difficulty order is City→Car Wash→Los Angeles→Boulevard→Metro; the `LEVELS` array in
+`config.js` is in that same order.)
 
 - **Players (skins only, identical physics):** `Artie` (`/artie-cube.png`), `Miles` (`/miles-cubo.png`).
 - **Themes:** neon (`THEME_CUBE/SHIP`), city (`CITY_CUBE/SHIP`), LA (`LA_CUBE/SHIP`), metro (`METRO_CUBE/SHIP`).
@@ -356,8 +388,9 @@ Boulevard · Metro. Levels other than City/LA are **placeholder copies of the `s
   `touchstart` for the jump). In-game jump lives in `Input.js`, separate from the UI handler.
   The only other canvas mouse listeners are the **hover** `mousemove`/`mouseleave` pair (desktop zoom,
   see §4) — they only read the position, never trigger actions, so they don't interfere.
-- No automated tests: validate gameplay by a static grid walk against §7, then `npm run dev` (test
-  mobile via DevTools device emulation: portrait shows the `#rotate` overlay + freezes; landscape
+- No automated tests, BUT level data has a checker: `node scripts/check-levels.mjs` (invariants +
+  cube-physics playability sim — see §9). Run it after any `src/data/*.js` edit; then `npm run dev`
+  (test mobile via DevTools device emulation: portrait shows the `#rotate` overlay + freezes; landscape
   menus are tappable).
 
 ## 11. Maintenance checklist (update THIS file when…)
