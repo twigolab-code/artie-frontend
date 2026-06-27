@@ -87,6 +87,12 @@ src/
     metro2.js          Metro (mapKey 'metro2') — copy of skyline (to be modified)
     carwash.js         Car Wash (mapKey 'carwash') — copy of skyline (to be modified)
     boulevard.js       Boulevard (mapKey 'boulevard') — copy of skyline (to be modified)
+    validate.js        SHARED level validator (pure fns over a grid): invariants() + playable() (cube-physics BFS). Imported by BOTH scripts/check-levels.mjs (Node) and src/builder/builder.js (browser) → single source of truth. Mirrors config.js @630
+    customLevels.js    SHARED custom-level store (localStorage 'gd_customLevels'): THEME_PRESETS, DIFFS, get/save(upsert by id)/delete + buildCustomEntry() + uniqueCustomId(). Imported by the builder (create/edit/delete) and main.js loadCustomLevels() (reads) — see §13
+  builder/
+    builder.js         Internal Game Builder (level editor) wired from builder.html — see §13
+    playtest.js        PlaytestPreview: embeds the real engine (GameLoop/Renderer/Player/Level/Camera) to PLAY the current grid in the builder ("Anteprima") — see §13
+builder.html           Standalone editor page (NOT part of the game); Vite multi-page entry, served at /builder.html
 ```
 
 ## 4. Core loop & state machine
@@ -183,7 +189,9 @@ src/
   the arrow is checked first (priority over "click = play"/select).
 - **Persistence (localStorage):** `gd_bestCoins` (per-level coin record), `gd_levelStats`
   (per-level bestPct/attempts/jumps), `gd_nickname` (player nickname), `artie_uid` (telemetry
-  `userId`, a persistent UUID v4 per device — see §12). **Audio is NOT persisted:**
+  `userId`, a persistent UUID v4 per device — see §12), `gd_customLevels` (levels created in the
+  Game Builder and saved into the game — array of self-contained level entries; loaded at startup by
+  `loadCustomLevels()` and appended to `LEVELS`/`MAPS`; see §13). **Audio is NOT persisted:**
   it ALWAYS starts ON at 50%/50% unmuted on every launch (desktop + mobile). `getSettings()` returns
   the config defaults (`MUSIC_VOLUME`/`SFX_VOLUME`/false) ignoring localStorage; `saveSettings()` is a
   no-op; `init()` clears any legacy `gd_audio` key. Options volume/mute changes apply to the current
@@ -372,6 +380,8 @@ contiguous ground hazards; no spike on a block top — AND (2) a **cube-physics 
 that PROVES a survivable path exists end-to-end. The simulator is what catches forced-death traps the
 eye misses (e.g. a hazard run too close to a tower face — keep ≥ ~5 flat tiles between them). It mirrors
 the @630 constants from `config.js`; keep it in sync if physics change. Then `npm run dev` to feel-check.
+The two validator functions (`invariants` + `playable`) now live in `src/data/validate.js` (shared by
+the Node checker **and** the in-browser Game Builder — see §13); `check-levels.mjs` just imports them.
 
 | # | id | name | mapKey | bg | floor | diff | signature mechanic |
 |---|----|------|--------|----|----|----|-------|
@@ -414,6 +424,8 @@ the @630 constants from `config.js`; keep it in sync if physics change. Then `np
 - **New game state, persistence key, or background/floor option** → update §4.
 - **New telemetry event or changed backend contract** → update §12 (and the §4 telemetry-wiring
   bullet) and verify the `_headers` `connect-src` origins match `VITE_ARTIE_*_URL`.
+- **Change to a validator rule (`invariants`/`playable`) or the Game Builder** → update §13 (and the
+  validator now lives in `src/data/validate.js`, shared with `check-levels.mjs` — edit it there once).
 
 ## 12. Telemetry / Analytics (`engine/Analytics.js`)
 Directional gameplay analytics. **`FRONTEND_INTEGRATION.md` is the authoritative contract**; this
@@ -450,3 +462,66 @@ provides the real proxied domain; swap it in `.env*` + `_headers` together.)
 - **Fail-silent guarantee:** every public method is a try/catch no-op; `flush()` runs as a detached
   promise and is never awaited; network only happens on the 30 s timer or unload, never in
   `update()`/`render()`.
+
+## 13. Game Builder (internal level editor)
+An **internal authoring tool** (NOT part of the player-facing game, not in any menu) to design level
+maps visually instead of hand-editing the `src/data/*.js` arrays. Standalone page, decoupled from the
+game runtime.
+
+- **Where:** `builder.html` (repo root) → `src/builder/builder.js`. It's a **Vite multi-page entry**
+  (`vite.config.js` `build.rollupOptions.input = { main, builder }`), so it's served at
+  **`/builder.html`** in `npm run dev` and emitted by `npm run build` (`dist/builder.html`). All
+  same-origin (font `/SoccerLeague.ttf`, the `data/*.js` imports) → no `_headers`/CSP change needed.
+- **Grid model:** an in-memory `12 × cols` array of chars (default `0`); replicates the game grid —
+  `TILE=60`, **row 9 = ground**, rows 10–11 = floor-render-only (**locked**: only `0` can be painted
+  there), rows 0–1 shaded as the ceiling death zone. `cols` grows as you paint rightward (free width).
+- **Editing UX = palette + paint:** pick a tile from the left palette (every code `0 1 2 3 4 5 6 7 8 9
+  s`, `0` = eraser), then click/drag across cells to paint (`pointerdown`+`pointermove`). Pan with the
+  **middle button / Shift-drag / hold-Space-drag**, the wheel, or ←/→. Canvas draws each tile echoing
+  the game's look (spikes, blocks, magenta/green portals, yellow orb/pad, gold coin) — it does NOT
+  import `Obstacle`/`Level` (those need camera/world state), just a deterministic visual echo.
+- **Live validation (same gate as CI):** every edit re-runs `invariants()` + `playable()` from
+  **`src/data/validate.js`** — the SAME functions `scripts/check-levels.mjs` uses — and renders a
+  ✅/❌ verdict, a per-rule checklist, and the playability result (max reachable tile if blocked). So
+  **green in the builder ⇒ passes `node scripts/check-levels.mjs`** (single source of truth, no drift).
+- **Export = JS data file:** "Genera file" builds `export const <name> = [ …12 strings… ];`, copies it
+  to the clipboard, and downloads `<name>.js`. Then wire it per §8 (drop in `src/data/`, add to `MAPS`
+  in `main.js`, add a `LEVELS` entry in `config.js`). The builder emits the **assembled array**
+  directly (no `assemble()`/named segments) — equivalent to what `Level` consumes.
+- **Import / edit existing:** "Carica livello…" loads any current map (`skyline/skyline2/metro2/
+  carwash/boulevard`) or a pasted array to seed the grid — start from the current paths to improve them.
+- **Anteprima (playable playtest):** "Anteprima" opens a full-screen overlay (`#previewOverlay`) that
+  **actually plays the current grid** using the real engine via `src/builder/playtest.js`
+  (`PlaytestPreview`). It **imports and reuses** `GameLoop`/`Renderer`/`Player`/`Level`/`Camera`/
+  `Collision` and re-implements only the slim per-frame glue `main.js` keeps private
+  (update + `handleOrbs/Portals/Pads/Coins`, death→respawn, win→"COMPLETATO!"). Input is a small
+  scoped `PreviewInput` (own listeners, removed on `destroy()` — NOT `engine/Input.js`, which has no
+  teardown). Esc / "Esci" → `destroy()` (stops the rAF + unbinds). Cosmetic effects (particles/trail/
+  bg) are omitted — a solid backdrop + floor line is enough to test feel. Throwaway: previewing saves
+  nothing. Enabled only when the level is **valid** (shares `runValidation()`'s `ok` via `lastValid`).
+- **Salva nel gioco (play in the real game) — create OR update:** "Salva nel gioco" (green) saves the
+  level **into the game** so it's instantly playable — no code edit. It writes a self-contained entry to
+  localStorage `gd_customLevels` via **`src/data/customLevels.js`** (shared module, like `validate.js`):
+  the modal sets **name + theme** (one of the 5 `THEME_PRESETS` = bg/floor/obstacleBottom; cube/ship
+  always the LA pair, inlined) **+ difficulty** (`DIFFS` → label + `diffFrac`), and `buildCustomEntry()`
+  produces `{id, name, diff, diffFrac, bg, floor, obstacleBottom, cube, ship, scrollSpeed,
+  mapKey:'custom-'+id, grid, custom:true}`. The game's **`loadCustomLevels()`** (right after `init()` in
+  `main.js`) reads them and does `MAPS[mapKey]=grid` + `LEVELS.push(entry)` — they appear at the **end of
+  the Livelli carousel** (tagged `CUSTOM`) and play via the existing `LEVELS.length`/`MAPS[mapKey]` paths;
+  stats/coins persist under the entry's `id`. **Create vs update** is driven by an `editing` context
+  (`{id,name,themeId,diffLabel}` or `null`): when **editing** an existing custom (see manager below) the
+  modal title/button become "Aggiorna" and Save **overwrites the same `id`** (`saveCustomLevel` upserts
+  by id); when **creating**, the id is `uniqueCustomId(slugify(name))` so two different new levels never
+  collide. After any save you stay "in edit" on that entry (a re-save updates, not duplicates). Device-
+  local, gated on validity. **`customLevels.js` is the single source of truth** for the key/presets/id,
+  imported by both the builder and the game (no drift).
+- **Livelli di gioco (manager: edit + delete, synced):** "Livelli di gioco" opens a panel listing every
+  **custom** level (`getCustomLevels()`), each with **Modifica** (`loadCustomForEdit` → `fromStrings` +
+  set `editing` + an "Modifica: \<name\>" banner with a **Nuovo livello** button to leave edit mode) and
+  **Elimina** (`deleteCustomLevel`, confirm). The same Modifica/Elimina list also appears inside the save
+  modal (shared `renderCustomList`). Edits sync to the game by overwriting the same id; deletes remove the
+  entry — the game reflects both on next launch. **Scope = custom only:** the 5 built-ins (in `config.js`,
+  not localStorage) are never editable/deletable here. "Carica livello…"/paste **exits edit mode**
+  (`editing=null`) since a built-in/pasted grid isn't a saved custom.
+- **Toolbar extras:** "Taglia vuoto" trims trailing empty columns; "Svuota" = **Nuovo livello** (clears
+  the grid AND exits edit mode, so a fresh level never overwrites a saved one).

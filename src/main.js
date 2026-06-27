@@ -27,6 +27,7 @@ import { skyline2 } from './data/skyline2.js';
 import { metro2 } from './data/metro2.js';
 import { carwash } from './data/carwash.js';
 import { boulevard } from './data/boulevard.js';
+import { getCustomLevels } from './data/customLevels.js';
 import { getSkin, LOGO_IMG, BG2_IMG, COIN_IMG, OPTIONS_IMG, STATS_IMG, getLevelBg, fontState } from './engine/Assets.js';
 import { aabbOverlap } from './game/Collision.js';
 import {
@@ -614,6 +615,24 @@ function init() {
   audio.setMusicVolume(s.music);
   audio.setSfxVolume(s.sfx);
   audio.setMuted(s.muted);
+}
+
+// Carica i livelli CUSTOM creati col Game Builder (salvati in localStorage da
+// builder.html) e li accoda a LEVELS + MAPS, così compaiono in fondo al carosello
+// e sono giocabili come gli altri. Ogni voce è autosufficiente (tema inlinato);
+// la griglia va registrata in MAPS sotto la sua mapKey. Fail-silent + skip dei
+// dati malformati (griglia non = 12 stringhe), così un localStorage corrotto non
+// blocca l'avvio.
+function loadCustomLevels() {
+  try {
+    for (const lv of getCustomLevels()) {
+      const grid = lv && lv.grid;
+      const validGrid = Array.isArray(grid) && grid.length === 12 && grid.every(r => typeof r === 'string');
+      if (!validGrid || !lv.mapKey || !lv.id) continue;
+      MAPS[lv.mapKey] = grid;
+      LEVELS.push({ ...lv });
+    }
+  } catch {}
 }
 
 function update(dt) {
@@ -1658,6 +1677,8 @@ function drawLevels() {
   drawGdBar(barX, barY, barW, 46, L.diffFrac ?? 0.5, `DIFFICOLTÀ: ${L.diff.toUpperCase()}`);
 
   text(`LIVELLO ${levelIndex + 1} / ${LEVELS.length}`, LOGICAL_WIDTH / 2, py + 232, 28, UI.yellow);
+  // Tag "CUSTOM" per i livelli creati col Game Builder (L.custom).
+  if (L.custom) text('CUSTOM', LOGICAL_WIDTH / 2, py + 256, 18, '#5fd000');
 
   // Record monete del livello: riga di icone (piene = raccolte nel record).
   const best = getBestCoins(L.id);
@@ -2469,6 +2490,7 @@ mqCoarse.addEventListener('change', onOrientationChange);
 onOrientationChange(); // stato iniziale: se aperto in portrait, overlay subito visibile
 
 init();
+loadCustomLevels(); // accoda i livelli custom (Game Builder) a LEVELS/MAPS
 const loop = new GameLoop(update, render);
 loop.start();
 
