@@ -9,6 +9,7 @@ import { Renderer } from './engine/Renderer.js';
 import { GameLoop } from './engine/GameLoop.js';
 import { Input } from './engine/Input.js';
 import { Audio } from './engine/Audio.js';
+import { Analytics } from './engine/Analytics.js';
 import { Player } from './game/Player.js';
 import { Level } from './game/Level.js';
 import { Camera } from './game/Camera.js';
@@ -149,6 +150,7 @@ const canvas = document.getElementById('game');
 const renderer = new Renderer(canvas);
 const input = new Input();
 const audio = new Audio();
+const analytics = new Analytics(); // telemetria fail-silent (no-op senza env)
 
 const player = new Player();
 const camera = new Camera();
@@ -290,6 +292,7 @@ function startLevel() {
   camera.setSpeed(lvl().scrollSpeed);
   player.setSkin(getSkin(ply().skin));
   gameState = 'playing';
+  analytics.trackLevelSelect(levelIndex + 1); // livello scelto (1-indexed per backend)
   attempts = 1;
   restart();
 }
@@ -318,6 +321,8 @@ function restart() {
   prevAlive = true;
   // Musica di gioco: riparte da capo a ogni avvio livello / morte / tentativo.
   audio.setTrack('game', { restart: true });
+  // Telemetria: nuovo tentativo → cattura attemptStart + emette level_start.
+  analytics.trackLevelStart(levelIndex + 1, attempts);
 }
 
 // Suono "tag" del player selezionato (schermata Player). Mappa l'id del player
@@ -647,6 +652,8 @@ function update(dt) {
       audio.playDeath();
       // Tentativo concluso con la morte: accumula nelle stats persistenti.
       commitRunStats(lvl().id, runJumps, bestRunPct);
+      // Telemetria: morte con progressPct 0-100 (bestRunPct è 0..1).
+      analytics.trackDeath(levelIndex + 1, attempts, Math.round(bestRunPct * 100));
       prevAlive = false;
     }
     particles.update(dt); // le schegge continuano a volare
@@ -708,6 +715,7 @@ function update(dt) {
   if (player.x >= finishX) {
     saveBestCoins(lvl().id, coinsCollected);
     commitRunStats(lvl().id, runJumps, 1);
+    analytics.trackLevelClear(levelIndex + 1, attempts); // livello completato
     gameState = 'complete';
   }
 }
@@ -1363,6 +1371,7 @@ function drawHomeCube() {
 // nello stato 'loader'. La home (e la sua musica) si aprono a fine suono, via
 // update(). L'AudioContext è già sbloccato dal click/tasto su Gioca.
 function goHome() {
+  analytics.start(nickname); // avvia sessione telemetria + evento session_start
   nickInput.style.display = 'none';
   nickInput.blur();
   // Assicura l'AudioContext sbloccato PRIMA del play: il listener globale di unlock
@@ -2462,3 +2471,11 @@ onOrientationChange(); // stato iniziale: se aperto in portrait, overlay subito 
 init();
 const loop = new GameLoop(update, render);
 loop.start();
+
+// Telemetria: chiusura tab / app in background → session_end + flush via beacon.
+// visibilitychange('hidden') è il segnale affidabile su iOS/Safari (beforeunload
+// spesso non scatta su mobile e rompe il bfcache); pagehide copre il bfcache.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') analytics.flushBeacon();
+});
+window.addEventListener('pagehide', () => analytics.flushBeacon());

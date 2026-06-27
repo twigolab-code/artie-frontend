@@ -59,6 +59,7 @@ src/
     Input.js           Keyboard/mouse/touch → jump; held (continuous) + consumePress() (edge, used by orbs)
     Audio.js           Music: two looped tracks from `MUSIC_TRACKS` (public/ `home.m4a`/`game.mp3`, routed via `music` gain); `setTrack('home'|'game', {restart})` switches them (menus=home, playing=game; game restarts each attempt); `stopMusic()` pauses all tracks immediately (used on death). Falls back to a synth beat (BPM 128) if files are missing. Beat clock always runs for `beatPhase()` (visual pulse). SFX: coin is synth (`_tone`); **file-based one-shots** via `playSfxFile(key)` → bool (fetch→`decodeAudioData`→`AudioBufferSource`, buffers from `SFX_FILES` preloaded in `unlock()`) — the player-select "tag" sounds (`tag-artie`/`tag-miles`), the **death** sound (`death-artie`, `playDeath` falls back to the synth `_tone` if the buffer isn't decoded yet), and the **loader** jingle (`loader` = `tag-tutto-fatto.MP3`). `playSfxOnce(key, onEnded)` is the same pipeline but returns the buffer's `duration` and fires `onEnded` at the end (used by the fake loader to size/finish itself). Both routed via `sfx` gain (respect SFX volume + mute). Music can be silenced per-screen via `setMusicSilenced(bool)` — a `_musicScreenMul` (0/1) multiplied into the `music` gain (single writer `_applyMusicGain()`) WITHOUT touching the persisted `_musicVol`; `main.js` drives it from `gameState` (muted on `players` so the tags stand out). Persistent volume/mute
     Assets.js          Async image cache w/ vector fallback; getSkin(), LOGO_IMG/BG2_IMG/COIN_IMG/PALM_IMG/OPTIONS_IMG/STATS_IMG (all WebP), `getLevelBg(name)` (cached lazy loader for the heavy level bg WebPs `LA`/`metro`/`wash`/`boulevard`, not loaded on home), fontState (local `SoccerLeague` font via @font-face in index.html)
+    Analytics.js       Fail-silent telemetry (see §12): persists `userId` (`artie_uid` localStorage UUID), per-load `sessionId`, per-flush `batchId`; `/session` handshake → Bearer token; in-memory event buffer flushed every 30 s (≤200/batch, splits, backoff+jitter on 429/5xx, 413→smaller batches); unload via `navigator.sendBeacon` (token in body `_t`). No-op unless `VITE_ARTIE_SESSION_URL`/`VITE_ARTIE_INGEST_URL` are set; never awaited on the loop
   game/
     Player.js          Cube & Ship entity: gravity, jump, mode switch, collision resolution, rotation, render
     Level.js           Parses the tile grid → entity arrays (obstacles/portals/orbs/pads/coins); culled render()
@@ -181,7 +182,8 @@ src/
   drawn and hit-tested on `players`/`levels`/`options`/`stats` → returns to `home`. On `levels`/`players`
   the arrow is checked first (priority over "click = play"/select).
 - **Persistence (localStorage):** `gd_bestCoins` (per-level coin record), `gd_levelStats`
-  (per-level bestPct/attempts/jumps), `gd_nickname` (player nickname). **Audio is NOT persisted:**
+  (per-level bestPct/attempts/jumps), `gd_nickname` (player nickname), `artie_uid` (telemetry
+  `userId`, a persistent UUID v4 per device — see §12). **Audio is NOT persisted:**
   it ALWAYS starts ON at 50%/50% unmuted on every launch (desktop + mobile). `getSettings()` returns
   the config defaults (`MUSIC_VOLUME`/`SFX_VOLUME`/false) ignoring localStorage; `saveSettings()` is a
   no-op; `init()` clears any legacy `gd_audio` key. Options volume/mute changes apply to the current
@@ -216,6 +218,14 @@ src/
   (`home`/`players`/`levels`/`options`/`stats`) play the `home` track; entering a level (`restart()`)
   plays `game` (restarted each attempt); leaving `complete` back to `levels` returns to `home` (see
   `audio.setTrack` calls in `main.js`).
+- **Telemetry wiring (fail-silent, off the critical path — full contract in §12):** the `analytics`
+  singleton (`engine/Analytics.js`) is fed from six game seams in `main.js`, each a single call:
+  `goHome()`→`session_start` (`analytics.start(nickname)`, also starts the 30 s flush timer + token
+  handshake), `startLevel()`→`level_select`, `restart()`→`level_start` (also captures the per-attempt
+  start time for `elapsedMs`), the one-time death frame in `update()`→`death` (with `progressPct =
+  Math.round(bestRunPct*100)`), the `player.x >= finishX` clear in `update()`→`level_clear`, and the
+  page-unload listeners (`visibilitychange`→hidden + `pagehide` after `loop.start()`)→`session_end`
+  + a `sendBeacon` flush. `level` is `levelIndex + 1` (backend wants ≥1). None of this is awaited.
 
 ## 5. Physics constants (from `config.js` — quote, don't guess)
 Velocities are scaled ×1.30 and gravity ×1.69 vs. an earlier "slow" baseline (the +30% speed feel).
@@ -392,6 +402,9 @@ the @630 constants from `config.js`; keep it in sync if physics change. Then `np
   cube-physics playability sim — see §9). Run it after any `src/data/*.js` edit; then `npm run dev`
   (test mobile via DevTools device emulation: portrait shows the `#rotate` overlay + freezes; landscape
   menus are tappable).
+- **Telemetry is fail-silent (§12):** never `await` an `analytics.*` call on the game loop; every
+  method is a try/catch no-op without env. If you add/move a telemetry event, keep the `_headers`
+  `connect-src` in sync with the backend origins (a mismatch silently CSP-blocks all requests).
 
 ## 11. Maintenance checklist (update THIS file when…)
 - **New/changed level** → update the table in §9 (and §8 if the wiring steps change).
@@ -399,3 +412,34 @@ the @630 constants from `config.js`; keep it in sync if physics change. Then `np
 - **Physics/layout constant changes** in `config.js` → update §5 (and §7 if jump/range/pad math shifts).
 - **New engine/game/effect module** → add a line to the directory map in §3.
 - **New game state, persistence key, or background/floor option** → update §4.
+- **New telemetry event or changed backend contract** → update §12 (and the §4 telemetry-wiring
+  bullet) and verify the `_headers` `connect-src` origins match `VITE_ARTIE_*_URL`.
+
+## 12. Telemetry / Analytics (`engine/Analytics.js`)
+Directional gameplay analytics. **`FRONTEND_INTEGRATION.md` is the authoritative contract**; this
+section summarizes the implementation. The backend is two AWS Lambda Function URLs (eu-central-1):
+a `/session` handshake and an `/ingest` endpoint.
+
+- **Identity:** `userId` = persistent UUID v4 in localStorage (`artie_uid`); `sessionId` = fresh UUID
+  per page load (= per play session); `batchId` = fresh UUID per flush (server dedups on it).
+- **Handshake:** at `session_start`, POST `{userId, sessionId}` to `VITE_ARTIE_SESSION_URL` → `{token,
+  exp}`. The token rides as `Authorization: Bearer <token>` on every ingest POST; refreshed near `exp`
+  (60 s skew) and once on a `401`.
+- **Batching:** events accumulate in memory and flush **once every 30 s** (one POST per ≤200 events;
+  a bigger window splits into multiple POSTs). Each event is `ts`-stamped at emission, so the buffer
+  is chronological; failed batches are re-queued **at the front** (`unshift`) to preserve order. Retry
+  with backoff+jitter on `429`/`5xx`; `413`→retry with smaller batches; `400`/`403`→drop. Payload shape
+  is **exact** (no extra fields): `{schemaVersion:1, batchId, sessionId, userId, nickname, clientSentAt,
+  events:[…]}`. Events: `session_start | level_select | level_start | death | level_clear | session_end`
+  (see §4 for which game seam emits which; `death` carries `progressPct` 0–100 + `elapsedMs`).
+- **Unload:** `visibilitychange`→hidden + `pagehide` push `session_end` and flush via
+  `navigator.sendBeacon` (can't set headers → token goes in the body as `_t`). Best-effort, no retry.
+- **Config:** `VITE_ARTIE_SESSION_URL` / `VITE_ARTIE_INGEST_URL` (Vite env, inlined at build time).
+  Without **both**, telemetry is a complete no-op (no network, no logs). Local dev uses `.env.local`
+  (gitignored via `*.local`); `.env.example` documents the vars; Cloudflare Pages sets them in the
+  build env. **CSP:** `public/_headers` `connect-src` must list both Lambda origins or the browser
+  blocks the requests (CSP is a static edge header and can't read the Vite env — the origins are
+  hard-coded there and must be kept in sync with the env URLs).
+- **Fail-silent guarantee:** every public method is a try/catch no-op; `flush()` runs as a detached
+  promise and is never awaited; network only happens on the 30 s timer or unload, never in
+  `update()`/`render()`.
