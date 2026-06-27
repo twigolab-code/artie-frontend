@@ -418,7 +418,10 @@ the @630 constants from `config.js`; keep it in sync if physics change. Then `np
 ## 12. Telemetry / Analytics (`engine/Analytics.js`)
 Directional gameplay analytics. **`FRONTEND_INTEGRATION.md` is the authoritative contract**; this
 section summarizes the implementation. The backend is two AWS Lambda Function URLs (eu-central-1):
-a `/session` handshake and an `/ingest` endpoint.
+a `/session` handshake and an `/ingest` endpoint, **reached via Cloudflare-proxied subdomains**
+(`session.<domain>` / `ingest.<domain>`) — NOT the direct `*.lambda-url.…on.aws` URLs, which are
+**origin-locked and return 403**. (`<domain>` is a placeholder `artie.example` until the backend
+provides the real proxied domain; swap it in `.env*` + `_headers` together.)
 
 - **Identity:** `userId` = persistent UUID v4 in localStorage (`artie_uid`); `sessionId` = fresh UUID
   per page load (= per play session); `batchId` = fresh UUID per flush (server dedups on it).
@@ -434,12 +437,16 @@ a `/session` handshake and an `/ingest` endpoint.
   (see §4 for which game seam emits which; `death` carries `progressPct` 0–100 + `elapsedMs`).
 - **Unload:** `visibilitychange`→hidden + `pagehide` push `session_end` and flush via
   `navigator.sendBeacon` (can't set headers → token goes in the body as `_t`). Best-effort, no retry.
-- **Config:** `VITE_ARTIE_SESSION_URL` / `VITE_ARTIE_INGEST_URL` (Vite env, inlined at build time).
-  Without **both**, telemetry is a complete no-op (no network, no logs). Local dev uses `.env.local`
-  (gitignored via `*.local`); `.env.example` documents the vars; Cloudflare Pages sets them in the
-  build env. **CSP:** `public/_headers` `connect-src` must list both Lambda origins or the browser
-  blocks the requests (CSP is a static edge header and can't read the Vite env — the origins are
-  hard-coded there and must be kept in sync with the env URLs).
+- **Config:** `VITE_ARTIE_SESSION_URL` / `VITE_ARTIE_INGEST_URL` (the proxied subdomains, **no
+  trailing slash**) + `VITE_ARTIE_TURNSTILE_SITE_KEY` (**predisposed but inactive** — present in
+  `.env.example` commented out; no widget/script is wired until the backend activates Turnstile and
+  provides the site key). All are Vite env, inlined at build time. Without **both** URLs telemetry is
+  a complete no-op (no network, no logs). Local dev uses `.env.local` (gitignored via `*.local`);
+  `.env.example` documents the vars; Cloudflare Pages sets them in the build env (build-time → saving
+  in the dashboard requires a rebuild to take effect). **CSP:** `public/_headers` `connect-src` must
+  list both telemetry origins or the browser blocks the requests (CSP is a static edge header and
+  can't read the Vite env — the origins are hard-coded there and must be kept in sync **exactly** with
+  the env URLs: same scheme/host, no path/trailing slash).
 - **Fail-silent guarantee:** every public method is a try/catch no-op; `flush()` runs as a detached
   promise and is never awaited; network only happens on the 30 s timer or unload, never in
   `update()`/`render()`.
