@@ -16,6 +16,7 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const DATA = resolve(__dir, '../src/data');
 
 const MAPS = [
+  ['testedo.js', 'testedo', 'TESTEDO'],
   ['skyline.js', 'skyline', 'City'],
   ['carwash.js', 'carwash', 'Car Wash'],
   ['skyline2.js', 'skyline2', 'Los Angeles'],

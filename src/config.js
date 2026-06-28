@@ -101,6 +101,22 @@ export const ROCKET_SPEED_LINE_COLOR = '#b8a6ff'; // linee di velocità (warp)
 // 5 Metro (Difficile). Ogni mappa ha una meccanica firma (vedi i file in data/).
 export const LEVELS = [
   {
+    // Livello creato col Game Builder e importato come built-in (visibile a tutti).
+    // Aspetto Car Wash; messo PRIMO nel carosello (l'ordine non è più strettamente
+    // per difficoltà crescente: questo è un livello difficile in testa).
+    id: 'testedo',
+    name: 'TESTEDO',
+    diff: 'Difficile', // lungo, sezione ship + orb/pad, fino a 4 hazard contigui
+    bg: 'carwash', // sfondo immagine wash.webp (loop)
+    floor: 'carwash', // asfalto scuro + bordo rosso neon
+    cube: LA_CUBE,
+    ship: LA_SHIP,
+    obstacleBottom: '#9a1414', // rosso neon scuro, coerente col bordo neon dell'asfalto
+    scrollSpeed: 630,
+    mapKey: 'testedo',
+    diffFrac: 0.85,
+  },
+  {
     id: 'city',
     name: 'City',
     diff: 'Facile', // L1: il piu facile (verticalita dolce, razzo subito)

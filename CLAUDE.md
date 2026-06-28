@@ -359,10 +359,12 @@ cube-physics **playability simulator** that proves a survivable path exists — 
    `mapKey` must match both the `data/` export and the `MAPS` key.
 
 ## 9. Current content
-All 5 levels are playable, **`scrollSpeed: 630` (same for all — difficulty rises via geometry, NOT
+All 6 levels are playable, **`scrollSpeed: 630` (same for all — difficulty rises via geometry, NOT
 speed)**, themes `LA_CUBE/LA_SHIP`. Each level sets a per-level `obstacleBottom` (bottom color of the
-spike/block gradient, coherent with its bg; top stays near-black `OBSTACLE_FILL_TOP`). Carousel order =
-difficulty order: City · Car Wash · Los Angeles · Boulevard · Metro.
+spike/block gradient, coherent with its bg; top stays near-black `OBSTACLE_FILL_TOP`). The 5 original
+levels are in difficulty order City · Car Wash · Los Angeles · Boulevard · Metro, but **`TESTEDO`** (a
+Game-Builder level imported as a built-in, Car Wash look, hard) now leads the carousel — so the carousel
+order is **no longer strictly difficulty-ascending**.
 
 **Map design — DISTINCT maps with a difficulty RAMP and real GD-style verticality.** Each map has its
 own signature mechanic (towers, aerial chains, tunnels, orb chains, pad launches) and a different
@@ -385,14 +387,16 @@ the Node checker **and** the in-browser Game Builder — see §13); `check-level
 
 | # | id | name | mapKey | bg | floor | diff | signature mechanic |
 |---|----|------|--------|----|----|----|-------|
+| 0 | testedo | TESTEDO | `testedo` | `carwash` (wash.webp) | `carwash` | Difficile | **Game-Builder import** (committed built-in); long 578-col map, ship section + orb/pad, ≤4 hazard. First in carousel |
 | 1 | city | City | `skyline` | `city` | `city` | Facile | gentle: air-stairs + 1 orb + single-cube hops, ship early, ≤1 hazard |
 | 2 | carwash | Car Wash | `carwash` | `carwash` (wash.webp) | `carwash` | Medio | tower hopping (staircase towers) + orb→`+3` + 3-cube chain, ship early |
 | 3 | losangeles | Los Angeles | `skyline2` | `losangeles` (LA.webp) | `la` | Medio | aerial chain + **first tunnel** + **pad**→`+4`, ship at mid, ≤3 |
 | 4 | boulevard | Boulevard | `boulevard` | `boulevard` (boulevard.webp) | `boulevard` | Difficile | **2-orb chain** + tall `+3` towers + longer tunnel, ship late, ≤4 once |
 | 5 | metro | Metro | `metro2` | `metro` (metro.webp) | `metro` | Difficile | everything: **3-orb chain**, pad→`+6`, dense `2262` runs, long tunnel, **ship finale** |
 
-(Note carousel/difficulty order is City→Car Wash→Los Angeles→Boulevard→Metro; the `LEVELS` array in
-`config.js` is in that same order.)
+(Carousel/`LEVELS` order in `config.js` is **TESTEDO → City → Car Wash → Los Angeles → Boulevard →
+Metro**. The 5 originals keep their City→…→Metro difficulty ramp; TESTEDO is a hard Game-Builder import
+placed first, so the carousel is no longer strictly difficulty-ascending.)
 
 - **Players (skins only, identical physics):** `Artie` (`/artie-cube.png`), `Miles` (`/miles-cubo.png`).
 - **Themes:** neon (`THEME_CUBE/SHIP`), city (`CITY_CUBE/SHIP`), LA (`LA_CUBE/SHIP`), metro (`METRO_CUBE/SHIP`).

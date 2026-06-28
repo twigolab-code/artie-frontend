@@ -27,6 +27,7 @@ import { skyline2 } from './data/skyline2.js';
 import { metro2 } from './data/metro2.js';
 import { carwash } from './data/carwash.js';
 import { boulevard } from './data/boulevard.js';
+import { testedo } from './data/testedo.js';
 import { getCustomLevels } from './data/customLevels.js';
 import { getSkin, LOGO_IMG, BG2_IMG, COIN_IMG, OPTIONS_IMG, STATS_IMG, getLevelBg, fontState } from './engine/Assets.js';
 import { aabbOverlap } from './game/Collision.js';
@@ -131,7 +132,7 @@ function unscalePoint(p) {
 // Mappe disponibili, indicizzate per mapKey del livello.
 // skyline = City · skyline2 = Los Angeles · metro2/carwash/boulevard = nuovi
 // (per ora duplicati di skyline, da differenziare).
-const MAPS = { skyline, skyline2, metro2, carwash, boulevard };
+const MAPS = { testedo, skyline, skyline2, metro2, carwash, boulevard };
 
 // --- Tema colore dello sfondo (transizione morbida tra le sezioni) ----------
 // Lerp RGB di due colori hex -> stringa 'rgb(...)'.
