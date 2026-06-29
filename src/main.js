@@ -90,11 +90,26 @@ function uiFont(spec) {
 // (pointer fine) ritorna esattamente 1 → nessun cambiamento.
 const UI_SCALE_PIVOT = 0.62; // fit-scale sotto cui la UI inizia a ingrandirsi
 const UI_SCALE_MAX = 1.35; // ingrandimento massimo
+// Semi-estensioni del contenuto autorale dei menu, misurate dal centro logico
+// (cx=640, cy=360): l'elemento più alto è la cima del logo (y=60 → 300 sopra),
+// il più basso il back delle Opzioni (~582 → 222 sotto), il più largo gli slot
+// player + nome. Servono a NON tagliare la UI quando viene scalata attorno al centro.
+const UI_CONTENT_HALF_W = 590;
+const UI_CONTENT_HALF_H = 330;
 function uiScale() {
-  if (!mqCoarse.matches) return 1; // desktop / pointer fine: invariato
+  if (!mqCoarse.matches) return 1; // desktop / pointer fine: invariato (path identico)
   const fit = Math.min(window.innerWidth / LOGICAL_WIDTH, window.innerHeight / LOGICAL_HEIGHT);
   if (!(fit > 0)) return 1;
-  return Math.max(1, Math.min(UI_SCALE_MAX, UI_SCALE_PIVOT / fit));
+  // Fattore di ingrandimento (come prima): ingrandisce gli schermi piccoli.
+  let s = Math.max(1, Math.min(UI_SCALE_MAX, UI_SCALE_PIVOT / fit));
+  // Clamp: la box-contenuto scalata attorno al centro deve stare nella safe-box
+  // visibile, così su schermi stretti/insoliti niente viene tagliato (s può < 1).
+  const halfW = Math.min(640 - renderer.safeLeft, renderer.safeRight - 640);
+  const halfH = Math.min(360 - renderer.safeTop, renderer.safeBottom - 360);
+  if (halfW > 0 && halfH > 0) {
+    s = Math.min(s, halfW / UI_CONTENT_HALF_W, halfH / UI_CONTENT_HALF_H);
+  }
+  return s;
 }
 // Applica/rimuove la scala-attorno-al-centro al context (per il blocco UI di una
 // schermata, DOPO aver disegnato lo sfondo che deve restare a piena vista).
@@ -424,7 +439,8 @@ canvas.addEventListener('pointerdown', (e) => {
     gameState = 'home'; // click ovunque (inclusa la freccia) torna alla Home
   } else if (gameState === 'options') {
     const r = optionRects();
-    if (pointInRect(ps, backArrowRect())) gameState = 'home';
+    // Freccia indietro ancorata al bordo reale → hit-test con `p` RAW (non scalato-centro).
+    if (pointInRect(p, backArrowRect())) gameState = 'home';
     else if (pointInRect(ps, r.musicMinus)) changeMusicVol(-1);
     else if (pointInRect(ps, r.musicPlus)) changeMusicVol(+1);
     else if (pointInRect(ps, r.sfxMinus)) changeSfxVol(-1);
@@ -432,8 +448,9 @@ canvas.addEventListener('pointerdown', (e) => {
     else if (pointInRect(ps, r.mute)) toggleMute();
     else if (pointInRect(ps, r.back)) gameState = 'home';
   } else if (gameState === 'players') {
-    // Freccia "indietro" in alto a sinistra → Home (ha priorità).
-    if (pointInRect(ps, backArrowRect())) {
+    // Freccia "indietro" in alto a sinistra → Home (ha priorità). Ancorata al bordo
+    // reale → hit-test con `p` RAW (non scalato-centro).
+    if (pointInRect(p, backArrowRect())) {
       gameState = 'home';
       return;
     }
@@ -448,14 +465,15 @@ canvas.addEventListener('pointerdown', (e) => {
       gameState = 'home';
     }
   } else if (gameState === 'levels') {
-    // Freccia "indietro" in alto a sinistra → Home (ha priorità sul "click = gioca").
-    if (pointInRect(ps, backArrowRect())) {
+    // Freccia "indietro" + frecce carosello ancorate ai bordi reali → hit-test con `p`
+    // RAW (non scalato-centro). La freccia indietro ha priorità sul "click = gioca".
+    if (pointInRect(p, backArrowRect())) {
       gameState = 'home';
       return;
     }
     const ar = arrowRects();
-    if (pointInRect(ps, ar.left)) levelIndex = (levelIndex + LEVELS.length - 1) % LEVELS.length;
-    else if (pointInRect(ps, ar.right)) levelIndex = (levelIndex + 1) % LEVELS.length;
+    if (pointInRect(p, ar.left)) levelIndex = (levelIndex + LEVELS.length - 1) % LEVELS.length;
+    else if (pointInRect(p, ar.right)) levelIndex = (levelIndex + 1) % LEVELS.length;
     else startLevel(); // click altrove = gioca
   } else if (gameState === 'complete') {
     input.consumePress(); // scarta l'edge del click così non parte un salto
@@ -1266,13 +1284,18 @@ function _arrow(rect, dir, color) {
 }
 
 // Rettangoli cliccabili delle frecce laterali (condivisi render/click).
+// Frecce laterali del carosello: ancorate ai BORDI VISIBILI REALI (safeLeft/Right)
+// e scalate per uiScale(), come l'HUD. Disegnate FUORI da pushUiScale (in real-space),
+// così su schermi larghi stanno ai bordi e su quelli stretti non escono mai.
 function arrowRects() {
-  const w = 110;
-  const h = 130;
-  const y = LOGICAL_HEIGHT / 2 - h / 2;
+  const s = uiScale();
+  const w = 110 * s;
+  const h = 130 * s;
+  const y = LOGICAL_HEIGHT / 2 - h / 2; // centro verticale = pivot di scala → stabile
+  const m = 24 * s; // margine dal bordo visibile reale
   return {
-    left: { x: 40, y, w, h },
-    right: { x: LOGICAL_WIDTH - 40 - w, y, w, h },
+    left: { x: renderer.safeLeft + m, y, w, h },
+    right: { x: renderer.safeRight - m - w, y, w, h },
   };
 }
 
@@ -1775,16 +1798,17 @@ function drawLevels() {
     text('COMING SOON', LOGICAL_WIDTH / 2, py + ph / 2, 56, UI.yellow);
   }
 
-  // Frecce laterali + pallini.
+  // Pallini indicatore (parte del pannello centrato → restano dentro pushUiScale).
+  dots(LEVELS.length, levelIndex, LOGICAL_WIDTH / 2, py + ph + 46);
+
+  popUiScale();
+
+  // Frecce laterali + "indietro": ancorate ai bordi reali → disegnate FUORI da
+  // pushUiScale (come l'HUD), così non vengono spinte fuori dalla scala-centro.
   const ar = arrowRects();
   arrow(ar.left, -1);
   arrow(ar.right, +1);
-  dots(LEVELS.length, levelIndex, LOGICAL_WIDTH / 2, py + ph + 46);
-
-  // Freccia "indietro" in alto a sinistra.
   arrow(backArrowRect(), -1, UI.yellow);
-
-  popUiScale();
 }
 
 // Schermo di fine livello: monete raccolte + record salvato.
@@ -1840,8 +1864,11 @@ function optionRects() {
     musicPlus: { x: cx + off, y: musicY, w: bw, h: bw },
     sfxMinus: { x: cx - off - bw, y: sfxY, w: bw, h: bw },
     sfxPlus: { x: cx + off, y: sfxY, w: bw, h: bw },
-    mute: { x: cx - 150, y: 470, w: 300, h: 64 },
-    back: { x: cx - 150, y: 548, w: 300, h: 64 },
+    // Mute/Indietro alzati: il più basso finisce a ~582 (dentro il pannello, ~138px
+    // dal fondo logico) per non collidere con la barra nav/gesture Android, che NON
+    // è riportata da env(safe-area-inset-bottom).
+    mute: { x: cx - 150, y: 452, w: 300, h: 60 },
+    back: { x: cx - 150, y: 522, w: 300, h: 60 },
   };
 }
 
@@ -1878,23 +1905,21 @@ function drawOptions() {
   button(r.mute, audio.muted ? 'AUDIO: OFF' : 'AUDIO: ON', audio.muted ? '#a02020' : UI.green);
   button(r.back, 'INDIETRO', '#8a3ff0');
 
-  // Freccia "indietro" in alto a sinistra (coerente con le altre schermate).
-  arrow(backArrowRect(), -1, UI.yellow);
-
   popUiScale();
+
+  // Freccia "indietro": ancorata al bordo reale → disegnata FUORI da pushUiScale.
+  arrow(backArrowRect(), -1, UI.yellow);
 }
 
 // Rettangolo cliccabile della freccia "indietro" (in alto a sinistra), condiviso
 // tra le schermate di menu (players/levels/options/stats).
+// Freccia "indietro" (in alto a sinistra): ancorata ai BORDI VISIBILI REALI e scalata
+// per uiScale(), come le frecce laterali e l'HUD. Disegnata FUORI da pushUiScale, così
+// resta dentro la safe-area (notch in alto, bordo sx) a ogni risoluzione/aspect ratio.
 function backArrowRect() {
-  // Garantiamo che — DOPO la scala-attorno-al-centro di pushUiScale (entro cui la
-  // freccia è disegnata E testata) — il bordo superiore resti sotto la safe-area.
-  // top disegnato = cy + (y-cy)*s  ⇒  y >= cy + (safeTop+pad - cy)/s.
   const s = uiScale();
-  const pad = 20;
-  const cy = LOGICAL_HEIGHT / 2;
-  const yMin = cy + (renderer.safeTop + pad - cy) / s;
-  return { x: 40, y: Math.max(40, yMin), w: 70, h: 58 };
+  const pad = 20 * s;
+  return { x: renderer.safeLeft + 24 * s, y: renderer.safeTop + pad, w: 70 * s, h: 58 * s };
 }
 // Alias storico usato da STATS.
 function statsBackRect() {
@@ -1907,9 +1932,6 @@ function drawStats() {
   screenBackdrop();
 
   pushUiScale(); // pannello/righe/titolo ingranditi su mobile
-
-  // Freccia di ritorno in alto a sinistra.
-  arrow(statsBackRect(), -1, UI.yellow);
 
   // Titolo.
   text('STATS', LOGICAL_WIDTH / 2, 110, 60, UI.yellow);
@@ -1946,6 +1968,9 @@ function drawStats() {
   ctx.restore();
 
   popUiScale();
+
+  // Freccia di ritorno: ancorata al bordo reale → disegnata FUORI da pushUiScale.
+  arrow(statsBackRect(), -1, UI.yellow);
 }
 
 // Barra stile GD: pillola scura con riempimento verde e percentuale/etichetta.
@@ -2026,10 +2051,10 @@ function drawPlayers() {
     });
   }
 
-  // Freccia "indietro" in alto a sinistra.
-  arrow(backArrowRect(), -1, UI.yellow);
-
   popUiScale();
+
+  // Freccia "indietro": ancorata al bordo reale → disegnata FUORI da pushUiScale.
+  arrow(backArrowRect(), -1, UI.yellow);
 }
 
 // Pulse 0..1 che batte sul beat (1 sul colpo, decade fino al successivo).
