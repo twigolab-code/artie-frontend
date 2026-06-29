@@ -696,15 +696,15 @@ const btnManage = document.getElementById('btnManage');
 const editBanner = document.getElementById('editBanner');
 const editBannerName = document.getElementById('editBannerName');
 
-// "Salva nel gioco" resta gated sulla validità (non mettere livelli imbattibili
-// nel carosello); "Anteprima" è SEMPRE attiva — si può provare anche un percorso
-// non ancora valido per capire dove si rompe.
+// "Salva nel gioco" e "Anteprima" sono SEMPRE attivi: come per l'Anteprima, si
+// può salvare anche un percorso non ancora valido (utile per iterare). Quando
+// la validazione non è verde lasciamo solo un titolo d'avviso, senza bloccare.
 function syncActionButtons() {
   if (btnPlay) {
-    btnPlay.disabled = !lastValid;
-    btnPlay.style.opacity = lastValid ? '1' : '0.45';
-    btnPlay.style.cursor = lastValid ? 'pointer' : 'not-allowed';
-    btnPlay.title = lastValid ? '' : 'Il livello deve essere valido per salvarlo nel gioco';
+    btnPlay.disabled = false;
+    btnPlay.style.opacity = '1';
+    btnPlay.style.cursor = 'pointer';
+    btnPlay.title = lastValid ? '' : 'Il livello ha errori di validazione, ma puoi salvarlo lo stesso';
   }
 }
 
@@ -948,7 +948,6 @@ function openManageModal() {
 
 // Modale "Salva nel gioco" — crea un nuovo livello O aggiorna quello in modifica.
 function openPlayModal() {
-  if (!lastValid) { alert('Il livello non è valido: sistema gli errori nel pannello Validazione prima di salvarlo.'); return; }
   resetModalExtras();
   const isEdit = !!editing;
   modalTitle.textContent = isEdit ? 'Aggiorna livello' : 'Salva nel gioco';
@@ -961,13 +960,15 @@ function openPlayModal() {
   modalTheme.value = isEdit ? editing.themeId : THEME_PRESETS[0].id;
   modalDiff.value = isEdit ? editing.diffLabel : 'Medio';
   modalText.style.display = 'none'; // niente textarea qui
-  modalHint.innerHTML = isEdit
+  const warn = lastValid ? '' :
+    '<br><span style="color:#ff7a6e">⚠️ Il livello ha errori di validazione: ' +
+    'verrà salvato lo stesso, ma potrebbe non essere completabile.</span>';
+  modalHint.innerHTML = (isEdit
     ? 'Aggiorna il livello esistente: sovrascrive la stessa voce nel gioco (stesso id).'
     : 'Salva il livello DENTRO il gioco: comparirà in fondo al carosello dei livelli, ' +
-      'pronto da giocare. (Solo su questo dispositivo. Per metterlo nel repo usa “Genera file”.)';
+      'pronto da giocare. (Solo su questo dispositivo. Per metterlo nel repo usa “Genera file”.)') + warn;
   modalAction.textContent = isEdit ? 'Aggiorna nel gioco' : 'Salva e aggiungi al gioco';
   modalAction.onclick = () => {
-    if (!lastValid) { alert('Il livello non è più valido.'); return; }
     const name = modalName.value.trim() || 'Mio Livello';
     // In modifica: stesso id. In creazione: id univoco dal nome.
     const id = editing ? editing.id : uniqueCustomId(slugify(name));
