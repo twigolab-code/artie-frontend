@@ -63,10 +63,23 @@ let cols = MIN_COLS;
 let grid = makeBlank(MIN_COLS);
 let activeCode = '2'; // tile selezionato (default: spuntone)
 let scrollX = 0; // offset orizzontale in px logici
+let scrollY = 0; // offset verticale in px logici (usato solo quando zoom>1)
 let painting = false; // sta dipingendo (mouse giù)
 let panning = false; // sta trascinando per scorrere (tasto centrale / spazio)
-let panStart = null; // {mx, scroll}
+let panStart = null; // {mx, my, scrollX, scrollY}
 let hoverCell = null; // {col, row} sotto al cursore
+
+// --- Zoom -------------------------------------------------------------------
+let zoom = 1; // moltiplica la scala base (fit-to-height)
+const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 1.2; // step moltiplicativo
+
+// --- Strumento + selezione/sposta -------------------------------------------
+let tool = 'paint'; // 'paint' | 'select'
+let selectPhase = 'idle'; // 'idle' | 'selecting' | 'selected' | 'moving'
+let selRect = null; // {c0,r0,c1,r1} inclusivo, in coordinate cella (normalizzato)
+let dragAnchor = null; // {col,row} cella di partenza del drag (rubber-band o move)
+let moveOffset = null; // {dc,dr} offset corrente in celle durante 'moving'
+let liftedCells = null; // [{dc,dr,code}] codici sollevati relativi a selRect.c0/r0
 
 function makeBlank(w) {
   return Array.from({ length: ROWS }, () => Array.from({ length: w }, () => '0'));
@@ -100,6 +113,8 @@ const statsEl = document.getElementById('stats');
 const checksEl = document.getElementById('checks');
 const legendEl = document.getElementById('legend');
 const modal = document.getElementById('modal');
+const zoomPctEl = document.getElementById('zoomPct');
+const btnSelect = document.getElementById('btnSelect');
 
 // --- Palette UI -------------------------------------------------------------
 function buildPalette() {
@@ -138,23 +153,28 @@ function resize() {
   canvas.width = Math.floor(wrap.clientWidth * dpr);
   canvas.height = Math.floor(wrap.clientHeight * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  clampScroll(); // un resize mentre si è zoomati può lasciare scrollY fuori range
   draw();
 }
 
 function viewW() { return canvas.parentElement.clientWidth; }
 function viewH() { return canvas.parentElement.clientHeight; }
 
-// Scala verticale: facciamo entrare le 12 righe (720px logici) nell'altezza vista.
-function scaleY() { return viewH() / (ROWS * TILE); }
+// Scala base: fa entrare le 12 righe (720px logici) nell'altezza vista (zoom=1).
+function baseScale() { return viewH() / (ROWS * TILE); }
+// Scala effettiva = base × zoom. UNICA fonte: tutto il resto (pointToCell, draw,
+// maxScroll, ruler, pan) deriva da qui, quindi lo zoom si propaga da solo.
+function scaleY() { return baseScale() * zoom; }
 
+// Punto pixel (vista) → coordinate mondo (px logici, frazionarie).
+function pointToWorld(px, py) {
+  const s = scaleY();
+  return { wx: px / s + scrollX, wy: py / s + scrollY };
+}
 // Punto pixel (vista) → cella griglia.
 function pointToCell(px, py) {
-  const s = scaleY();
-  const worldX = px / s + scrollX;
-  const worldY = py / s;
-  const col = Math.floor(worldX / TILE);
-  const row = Math.floor(worldY / TILE);
-  return { col, row };
+  const { wx, wy } = pointToWorld(px, py);
+  return { col: Math.floor(wx / TILE), row: Math.floor(wy / TILE) };
 }
 
 function maxScroll() {
@@ -163,7 +183,37 @@ function maxScroll() {
   const visW = viewW() / s;
   return Math.max(0, totalW - visW + TILE * 4); // un po' di margine a destra
 }
-function clampScroll() { scrollX = Math.max(0, Math.min(scrollX, maxScroll())); }
+// Scroll verticale massimo: 0 quando zoom≤1 (le 12 righe ci stanno tutte), così
+// scrollY si auto-blocca a 0 senza casi speciali.
+function maxScrollY() {
+  const s = scaleY();
+  const visH = viewH() / s;
+  return Math.max(0, ROWS * TILE - visH);
+}
+function clampScroll() {
+  scrollX = Math.max(0, Math.min(scrollX, maxScroll()));
+  scrollY = Math.max(0, Math.min(scrollY, maxScrollY()));
+}
+
+// Imposta lo zoom mantenendo fisso il punto mondo sotto al cursore (anchorX/Y in
+// px vista; se assenti, ancora al centro). Aggiorna scroll, ridisegna, aggiorna UI.
+function setZoom(nextZoom, anchorX, anchorY) {
+  nextZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, nextZoom));
+  if (nextZoom === zoom) return;
+  const ax = anchorX == null ? viewW() / 2 : anchorX;
+  const ay = anchorY == null ? viewH() / 2 : anchorY;
+  const before = pointToWorld(ax, ay); // mondo sotto al cursore PRIMA
+  zoom = nextZoom;
+  const s = scaleY();
+  scrollX = before.wx - ax / s; // stesso mondo resta sotto (ax,ay)
+  scrollY = before.wy - ay / s;
+  clampScroll();
+  updateZoomUI();
+  draw();
+}
+function updateZoomUI() {
+  if (zoomPctEl) zoomPctEl.textContent = `${Math.round(zoom * 100)}%`;
+}
 
 // --- Mutazione griglia ------------------------------------------------------
 function ensureCols(minCols) {
@@ -188,6 +238,89 @@ function clearAll() {
   cols = MIN_COLS;
   grid = makeBlank(MIN_COLS);
   scrollX = 0;
+  scrollY = 0;
+  clearSelection();
+  scheduleValidate();
+  draw();
+}
+
+// --- Selezione / spostamento blocco -----------------------------------------
+function normRect(a, b) {
+  return {
+    c0: Math.min(a.col, b.col), c1: Math.max(a.col, b.col),
+    r0: Math.min(a.row, b.row), r1: Math.max(a.row, b.row),
+  };
+}
+function clampRectToGrid(r) {
+  return {
+    c0: Math.max(0, r.c0), c1: Math.min(cols - 1, r.c1),
+    r0: Math.max(0, r.r0), r1: Math.min(ROWS - 1, r.r1),
+  };
+}
+function rectContainsCell(r, col, row) {
+  return col >= r.c0 && col <= r.c1 && row >= r.r0 && row <= r.r1;
+}
+function clearSelection() {
+  selRect = null;
+  selectPhase = 'idle';
+  liftedCells = null;
+  dragAnchor = null;
+  moveOffset = null;
+}
+
+// Solleva i codici dei tile selezionati (relativi al top-left), saltando le righe
+// bloccate (10-11) e le celle vuote. Chiamata entrando in 'moving'.
+function captureSelection() {
+  liftedCells = [];
+  for (let r = selRect.r0; r <= selRect.r1; r++) {
+    if (LOCKED_ROWS.includes(r)) continue;
+    for (let c = selRect.c0; c <= selRect.c1; c++) {
+      const code = grid[r][c];
+      if (code === '0') continue;
+      liftedCells.push({ dc: c - selRect.c0, dr: r - selRect.r0, code });
+    }
+  }
+}
+
+// Sposta il blocco selezionato di (dc,dr) celle: cancella la sorgente e ristampa
+// a destinazione (cut+paste). Scarta le celle che finirebbero fuori griglia o nelle
+// righe bloccate. La selezione segue la nuova posizione.
+function commitMove(dc, dr) {
+  if (!liftedCells || (dc === 0 && dr === 0)) return;
+  const maxCol = selRect.c1 + dc;
+  if (maxCol + 1 > cols) ensureCols(maxCol + 1);
+  // 1) cancella la sorgente (solo celle sollevate = non bloccate)
+  for (const { dc: cdc, dr: cdr } of liftedCells) {
+    grid[selRect.r0 + cdr][selRect.c0 + cdc] = '0';
+  }
+  // 2) stampa a destinazione (scarta fuori-bound / righe bloccate)
+  for (const { dc: cdc, dr: cdr, code } of liftedCells) {
+    const tc = selRect.c0 + cdc + dc;
+    const tr = selRect.r0 + cdr + dr;
+    if (tc < 0 || tr < 0 || tr >= ROWS) continue;
+    if (LOCKED_ROWS.includes(tr)) continue;
+    if (tc + 1 > cols) ensureCols(tc + 1);
+    grid[tr][tc] = code;
+  }
+  // 3) la selezione segue lo spostamento (clamp alle righe valide)
+  selRect = clampRectToGrid({
+    c0: selRect.c0 + dc, c1: selRect.c1 + dc,
+    r0: selRect.r0 + dr, r1: selRect.r1 + dr,
+  });
+  liftedCells = null;
+  clampScroll();
+  scheduleValidate();
+  draw();
+}
+
+// Cancella i tile dentro la selezione (Canc/Backspace in modalità select).
+function deleteSelection() {
+  if (!selRect) return;
+  for (let r = selRect.r0; r <= selRect.r1; r++) {
+    if (LOCKED_ROWS.includes(r)) continue;
+    for (let c = selRect.c0; c <= selRect.c1; c++) grid[r][c] = '0';
+  }
+  clearSelection();
   scheduleValidate();
   draw();
 }
@@ -216,12 +349,16 @@ function draw() {
 
   ctx.save();
   ctx.scale(s, s);
-  ctx.translate(-scrollX, 0);
+  ctx.translate(-scrollX, -scrollY);
 
   const left = scrollX;
   const right = scrollX + w / s;
   const c0 = Math.max(0, Math.floor(left / TILE) - 1);
   const c1 = Math.min(cols, Math.ceil(right / TILE) + 1);
+  // Finestra di righe visibili (quando zoomati non disegnamo le 12 righe inutili).
+  const top = scrollY, bottom = scrollY + h / s;
+  const r0 = Math.max(0, Math.floor(top / TILE) - 1);
+  const r1 = Math.min(ROWS, Math.ceil(bottom / TILE) + 1);
 
   // Bande di sfondo: zona morte soffitto (0-1), corpo, terra (9), pavimento (10-11)
   drawBand(c0, c1, 0, 2, 'rgba(224,35,20,0.07)'); // zona morte soffitto
@@ -255,17 +392,20 @@ function draw() {
   ctx.lineTo(right, floorY);
   ctx.stroke();
 
-  // Tile posizionati
+  // Tile posizionati (solo finestra visibile righe×colonne)
   for (let c = c0; c < c1; c++) {
-    for (let r = 0; r < ROWS; r++) {
+    for (let r = r0; r < r1; r++) {
       const code = grid[r][c];
       if (code === '0') continue;
       drawTile(code, c, r);
     }
   }
 
-  // Cella sotto al cursore (anteprima)
-  if (hoverCell && hoverCell.col >= 0 && hoverCell.row >= 0 && hoverCell.row < ROWS) {
+  // Selezione + "ghost" durante lo spostamento (solo in modalità select).
+  if (tool === 'select' && selRect) drawSelection(s);
+
+  // Cella sotto al cursore (anteprima) — solo in modalità disegno.
+  if (tool === 'paint' && hoverCell && hoverCell.col >= 0 && hoverCell.row >= 0 && hoverCell.row < ROWS) {
     const x = hoverCell.col * TILE, y = hoverCell.row * TILE;
     ctx.fillStyle = 'rgba(255,210,63,0.18)';
     ctx.fillRect(x, y, TILE, TILE);
@@ -279,6 +419,33 @@ function draw() {
   // Etichette colonne ogni 5 (in screen space, in basso)
   drawColumnRuler(s);
   updateHud();
+}
+
+// Disegna il rettangolo di selezione (tinta + bordo tratteggiato) e, durante lo
+// spostamento, il "ghost" dei tile sollevati all'offset corrente. In coord mondo
+// (chiamata dentro draw(), col context già scalato/traslato).
+function drawSelection(s) {
+  const { c0, r0, c1, r1 } = selRect;
+  const x = c0 * TILE, y = r0 * TILE;
+  const w = (c1 - c0 + 1) * TILE, hh = (r1 - r0 + 1) * TILE;
+  ctx.fillStyle = 'rgba(43,84,224,0.18)'; // tinta blu UI
+  ctx.fillRect(x, y, w, hh);
+  ctx.strokeStyle = 'rgba(120,160,255,0.95)';
+  ctx.lineWidth = 2 / s;
+  ctx.setLineDash([8 / s, 6 / s]);
+  ctx.strokeRect(x + 1 / s, y + 1 / s, w - 2 / s, hh - 2 / s);
+  ctx.setLineDash([]);
+
+  if (selectPhase === 'moving' && liftedCells && moveOffset) {
+    ctx.globalAlpha = 0.55;
+    for (const { dc, dr, code } of liftedCells) {
+      drawTile(code, c0 + dc + moveOffset.dc, r0 + dr + moveOffset.dr);
+    }
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'rgba(255,210,63,0.9)';
+    ctx.lineWidth = 2 / s;
+    ctx.strokeRect(x + moveOffset.dc * TILE, y + moveOffset.dr * TILE, w, hh);
+  }
 }
 
 function drawBand(c0, c1, startRow, nRows, color) {
@@ -450,7 +617,10 @@ function drawColumnRuler(s) {
 
 function updateHud() {
   const cell = hoverCell ? `col ${hoverCell.col}, row ${hoverCell.row}` : '—';
-  hudEl.textContent = `${cols} colonne · cella: ${cell} · scroll: ${Math.round(scrollX)}px · [trascina con tasto centrale o Spazio per scorrere]`;
+  const mode = tool === 'select' ? 'SELEZIONE' : 'disegna';
+  hudEl.textContent =
+    `${cols} col · cella ${cell} · zoom ${Math.round(zoom * 100)}% · scroll ${Math.round(scrollX)},${Math.round(scrollY)} · ` +
+    `[${mode}] · Spazio/tasto-centrale = scorri · Ctrl+rotella = zoom`;
 }
 
 // --- Validazione live -------------------------------------------------------
@@ -824,40 +994,92 @@ function closePreview() {
 function bindEvents() {
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
-    const isPan = e.button === 1 || e.shiftKey || spaceDown;
-    if (isPan) {
+    // Pan: tasto centrale o Spazio sempre; Shift solo in modalità disegno (in
+    // select lo Shift è libero — la selezione si fa col trascinamento normale).
+    const pan = e.button === 1 || spaceDown || (tool === 'paint' && e.shiftKey);
+    if (pan) {
       panning = true;
-      panStart = { mx: e.offsetX, scroll: scrollX };
+      panStart = { mx: e.offsetX, my: e.offsetY, scrollX, scrollY };
+      return;
+    }
+    const c = pointToCell(e.offsetX, e.offsetY);
+    if (tool === 'select') {
+      if (selRect && rectContainsCell(selRect, c.col, c.row)) {
+        selectPhase = 'moving';
+        dragAnchor = c;
+        moveOffset = { dc: 0, dr: 0 };
+        captureSelection();
+      } else {
+        selectPhase = 'selecting';
+        dragAnchor = c;
+        selRect = clampRectToGrid(normRect(c, c));
+      }
+      draw();
       return;
     }
     painting = true;
-    const c = pointToCell(e.offsetX, e.offsetY);
     paintCell(c.col, c.row);
   });
 
   canvas.addEventListener('pointermove', (e) => {
     if (panning) {
       const s = scaleY();
-      scrollX = panStart.scroll - (e.offsetX - panStart.mx) / s;
+      scrollX = panStart.scrollX - (e.offsetX - panStart.mx) / s;
+      scrollY = panStart.scrollY - (e.offsetY - panStart.my) / s;
       clampScroll();
       draw();
       return;
     }
     const c = pointToCell(e.offsetX, e.offsetY);
     hoverCell = c;
+    if (tool === 'select') {
+      if (selectPhase === 'selecting') {
+        selRect = clampRectToGrid(normRect(dragAnchor, c));
+        draw();
+      } else if (selectPhase === 'moving') {
+        moveOffset = { dc: c.col - dragAnchor.col, dr: c.row - dragAnchor.row };
+        draw();
+      }
+      return;
+    }
     if (painting) paintCell(c.col, c.row);
     else draw();
   });
 
-  const endPointer = () => { painting = false; panning = false; };
+  const endPointer = () => {
+    if (tool === 'select') {
+      if (selectPhase === 'selecting') {
+        selectPhase = selRect ? 'selected' : 'idle';
+      } else if (selectPhase === 'moving') {
+        commitMove(moveOffset.dc, moveOffset.dr); // chiama scheduleValidate + draw
+        selectPhase = 'selected';
+        moveOffset = null;
+        dragAnchor = null;
+      }
+    }
+    painting = false;
+    panning = false;
+  };
   canvas.addEventListener('pointerup', endPointer);
   canvas.addEventListener('pointercancel', endPointer);
   canvas.addEventListener('pointerleave', () => { hoverCell = null; draw(); });
 
-  // Scroll con la rotella (orizzontale)
+  // Rotella: Ctrl/Cmd = zoom (centrato sul cursore); Shift = scroll verticale
+  // (utile quando zoomati); altrimenti scroll orizzontale (comportamento storico).
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     const s = scaleY();
+    if (e.ctrlKey || e.metaKey) {
+      const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+      setZoom(zoom * factor, e.offsetX, e.offsetY);
+      return;
+    }
+    if (e.shiftKey) {
+      scrollY += (e.deltaY + e.deltaX) / s;
+      clampScroll();
+      draw();
+      return;
+    }
     scrollX += (e.deltaY + e.deltaX) / s;
     clampScroll();
     draw();
@@ -870,7 +1092,13 @@ function bindEvents() {
     if (previewOverlay.classList.contains('show')) return;
     if (e.code === 'ArrowRight') { scrollX += TILE * 3; clampScroll(); draw(); }
     else if (e.code === 'ArrowLeft') { scrollX -= TILE * 3; clampScroll(); draw(); }
+    else if (e.code === 'ArrowUp') { scrollY -= TILE * 3; clampScroll(); draw(); }
+    else if (e.code === 'ArrowDown') { scrollY += TILE * 3; clampScroll(); draw(); }
     else if (e.code === 'Space') { spaceDown = true; e.preventDefault(); }
+    else if (e.key === '+' || e.key === '=') { setZoom(zoom * ZOOM_STEP); e.preventDefault(); }
+    else if (e.key === '-' || e.key === '_') { setZoom(zoom / ZOOM_STEP); e.preventDefault(); }
+    else if (e.key === '0') { zoom = 1; scrollY = 0; clampScroll(); updateZoomUI(); draw(); e.preventDefault(); }
+    else if (tool === 'select' && (e.code === 'Delete' || e.code === 'Backspace')) { deleteSelection(); e.preventDefault(); }
   });
   window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
 
@@ -890,10 +1118,23 @@ function bindEvents() {
   modalCancel.addEventListener('click', hideModal);
   modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(); });
 
-  // ESC chiude l'anteprima (priorità) o la modale.
+  // Toggle "Seleziona": alterna disegno/selezione; uscendo azzera la selezione.
+  btnSelect.addEventListener('click', () => {
+    tool = tool === 'select' ? 'paint' : 'select';
+    if (tool === 'paint') clearSelection();
+    btnSelect.classList.toggle('active', tool === 'select');
+    hoverCell = null;
+    draw();
+  });
+  // Zoom +/- dalla barra (centrati sul viewport).
+  document.getElementById('btnZoomIn').addEventListener('click', () => setZoom(zoom * ZOOM_STEP));
+  document.getElementById('btnZoomOut').addEventListener('click', () => setZoom(zoom / ZOOM_STEP));
+
+  // ESC chiude l'anteprima (priorità), poi deseleziona, poi chiude la modale.
   window.addEventListener('keydown', (e) => {
     if (e.code !== 'Escape') return;
     if (previewOverlay.classList.contains('show')) closePreview();
+    else if (tool === 'select' && selRect) { clearSelection(); draw(); }
     else if (modal.classList.contains('show')) hideModal();
   });
 

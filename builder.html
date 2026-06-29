@@ -71,6 +71,14 @@
       .btn.green { background: var(--green); }
       .btn.ghost { background: rgba(255, 255, 255, 0.08); }
       .btn.small { font-size: 13px; padding: 6px 10px; }
+      /* Stato "attivo" del toggle Seleziona (come .swatch.active) */
+      .btn.active { background: var(--yellow); color: #000; border-color: var(--outline); }
+      /* Controllo zoom: −  100%  + */
+      .zoomctl { display: flex; align-items: center; gap: 6px; }
+      #zoomPct {
+        font-size: 13px; min-width: 46px; text-align: center;
+        color: rgba(255, 255, 255, 0.8); font-family: ui-monospace, monospace;
+      }
       /* --- Palette ------------------------------------------------------- */
       #palette {
         grid-area: palette;
@@ -289,6 +297,12 @@
     <div id="app">
       <div id="topbar">
         <span class="title">OG DASH — GAME BUILDER</span>
+        <button class="btn ghost small" id="btnSelect">Seleziona</button>
+        <div class="zoomctl">
+          <button class="btn ghost small" id="btnZoomOut" title="Riduci (−)">−</button>
+          <span id="zoomPct">100%</span>
+          <button class="btn ghost small" id="btnZoomIn" title="Ingrandisci (+)">+</button>
+        </div>
         <button class="btn ghost small" id="btnManage">Livelli di gioco</button>
         <button class="btn ghost small" id="btnLoad">Carica livello…</button>
         <button class="btn ghost small" id="btnTrim">Taglia vuoto</button>

@@ -484,6 +484,21 @@ game runtime.
   **middle button / Shift-drag / hold-Space-drag**, the wheel, or ←/→. Canvas draws each tile echoing
   the game's look (spikes, blocks, magenta/green portals, yellow orb/pad, gold coin) — it does NOT
   import `Obstacle`/`Level` (those need camera/world state), just a deterministic visual echo.
+- **Zoom + pan:** the whole view transform routes through `scaleY() = baseScale()*zoom` (single source —
+  `pointToCell`/`draw`/`maxScroll`/ruler all inherit it). Zoom via the toolbar **− / % / +** buttons,
+  **Ctrl/Cmd+wheel** (centered on the cursor via `setZoom`), or keys `+`/`-`/`0`-reset (`0.5×–3×`). Plain
+  wheel still = horizontal scroll. When zoomed in (`zoom>1`) a vertical `scrollY` unlocks (`maxScrollY>0`):
+  pan it with Space/middle-drag (now both axes), **Shift+wheel**, or ↑/↓. `clampScroll` bounds both axes
+  (`scrollY` auto-locks to 0 at `zoom≤1`); `resize()` re-clamps.
+- **Multi-select + move (the "Seleziona" toggle):** click **Seleziona** (toolbar toggle, `.btn.active`) to
+  enter select mode (paint disabled; pan still works). Drag a **rubber-band** rectangle (`selRect`, tinted
+  + dashed); drag **inside** it to **move the block** — a 55%-alpha ghost follows, release commits a
+  **cut+paste** (`commitMove`: clear source → stamp at offset, `ensureCols` past the right edge, cells
+  landing in rows 10–11/off-grid are **dropped**). **Canc/Backspace** clears the selected cells
+  (`deleteSelection`), **Esc** deselects, clicking Seleziona again returns to paint. Rows 10–11 are never
+  lifted/written (keeps the `validate.js` "render pavimento" invariant green). State machine:
+  `idle→selecting→selected→moving`; helpers `normRect`/`clampRectToGrid`/`rectContainsCell`/
+  `captureSelection`/`clearSelection`. All mutations call `scheduleValidate()`+`draw()`.
 - **Live validation (same gate as CI):** every edit re-runs `invariants()` + `playable()` from
   **`src/data/validate.js`** — the SAME functions `scripts/check-levels.mjs` uses — and renders a
   ✅/❌ verdict, a per-rule checklist, and the playability result (max reachable tile if blocked). So
