@@ -9,9 +9,12 @@ import {
 } from '../config.js';
 
 // =============================================================================
-// StarTrail — emettitore di stelle gialle dalla coda del razzo ("fumo di
-// stelle", effetto mossa speciale). Le stelle escono all'indietro, ruotano,
+// StarTrail — emettitore di particelle dalla coda del razzo ("fumo di stelle",
+// effetto mossa speciale). Le particelle escono all'indietro, ruotano,
 // rimpiccioliscono e svaniscono. WORLD-space.
+//
+// La FORMA e il COLORE sono per-player (setStyle): Artie = stelle gialle,
+// Miles = note musicali gialle (vedi PLAYERS.fx). Default = stella gialla.
 //
 // Jitter deterministico (no Math.random): un seed interno incrementale alimenta
 // un hash, così l'effetto è ricco ma riproducibile col loop a timestep fisso.
@@ -26,6 +29,14 @@ export class StarTrail {
     this.list = [];
     this._seed = 0;
     this._frame = 0;
+    this._color = TRAIL_STAR_COLOR; // colore particella (giallo di default)
+    this._shape = 'star'; // 'star' | 'note'
+  }
+
+  // Imposta il look del particellare (chiamato in main.js dal player attivo).
+  setStyle(color, shape) {
+    if (color) this._color = color;
+    if (shape) this._shape = shape;
   }
 
   clear() {
@@ -82,11 +93,12 @@ export class StarTrail {
       ctx.translate(p.x - cameraX, p.y);
       ctx.rotate(p.angle);
 
-      // Stella piena gialla con glow (niente bordo scuro).
-      ctx.shadowColor = TRAIL_STAR_COLOR;
+      // Particella piena con glow (niente bordo scuro): stella o nota musicale.
+      ctx.shadowColor = this._color;
       ctx.shadowBlur = 12 * t;
-      this._starPath(ctx, r, r * 0.45);
-      ctx.fillStyle = TRAIL_STAR_COLOR;
+      if (this._shape === 'note') this._notePath(ctx, r);
+      else this._starPath(ctx, r, r * 0.45);
+      ctx.fillStyle = this._color;
       ctx.fill();
 
       ctx.restore();
@@ -104,6 +116,39 @@ export class StarTrail {
       if (k === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
+    ctx.closePath();
+  }
+
+  // Nota musicale (croma ♪) centrata in (0,0), scalata su r: testa ovale in
+  // basso a sinistra + gambo verticale + bandierina curva. Un'unica path piena.
+  _notePath(ctx, r) {
+    const headRx = r * 0.55; // semiasse testa
+    const headRy = r * 0.42;
+    const hx = -r * 0.28; // centro testa (basso-sx)
+    const hy = r * 0.6;
+    const stemX = hx + headRx * 0.85; // gambo sul lato dx della testa
+    const stemTopY = -r * 1.05;
+    const stemW = r * 0.16;
+
+    ctx.beginPath();
+    // Testa ovale (leggermente inclinata).
+    ctx.ellipse(hx, hy, headRx, headRy, -0.35, 0, Math.PI * 2);
+    // Gambo (rettangolo verticale) come sotto-path.
+    ctx.moveTo(stemX, hy);
+    ctx.lineTo(stemX, stemTopY);
+    ctx.lineTo(stemX + stemW, stemTopY);
+    ctx.lineTo(stemX + stemW, hy - headRy * 0.4);
+    ctx.closePath();
+    // Bandierina: curva che parte dalla cima del gambo e ricade.
+    ctx.moveTo(stemX + stemW, stemTopY);
+    ctx.quadraticCurveTo(
+      stemX + stemW + r * 0.85, stemTopY + r * 0.35,
+      stemX + stemW * 0.4, stemTopY + r * 0.95,
+    );
+    ctx.quadraticCurveTo(
+      stemX + stemW + r * 0.5, stemTopY + r * 0.45,
+      stemX + stemW, stemTopY + r * 0.18,
+    );
     ctx.closePath();
   }
 }

@@ -41,15 +41,21 @@ export class Player {
   constructor() {
     this.size = PLAYER_SIZE;
     this.cubeSkin = DEFAULT_CUBE_IMG; // skin del cubo (cambiabile con setSkin)
+    this.shipSkin = SHIP_IMG; // skin del razzo (cambiabile con setShipSkin)
     // Contatore monotòno dei salti (mai azzerato): main.js ne legge il delta
     // per conteggio salti + SFX. Non sta in reset() così sopravvive ai restart.
     this.jumpCount = 0;
     this.reset(0);
   }
 
-  // Imposta la skin del cubo (handle da Assets.getSkin). Il razzo resta comune.
+  // Imposta la skin del cubo (handle da Assets.getSkin).
   setSkin(handle) {
     if (handle) this.cubeSkin = handle;
+  }
+
+  // Imposta la skin del razzo (handle da Assets.getSkin), per-player.
+  setShipSkin(handle) {
+    if (handle) this.shipSkin = handle;
   }
 
   reset(worldX) {
@@ -319,12 +325,12 @@ export class Player {
     ctx.translate(cx, cy);
     ctx.rotate(this.pitch);
 
-    if (SHIP_IMG.ready) {
+    if (this.shipSkin.ready) {
       // Skin PNG del razzo: rispetta l'aspect ratio nativo dell'immagine
       // (altezza = size del player, larghezza proporzionale), muso a destra.
       const h = this.size;
-      const w = (SHIP_IMG.img.naturalWidth / SHIP_IMG.img.naturalHeight) * h;
-      ctx.drawImage(SHIP_IMG.img, -w / 2, -h / 2, w, h);
+      const w = (this.shipSkin.img.naturalWidth / this.shipSkin.img.naturalHeight) * h;
+      ctx.drawImage(this.shipSkin.img, -w / 2, -h / 2, w, h);
       if (USE_SKIN_GLOW) this._skinEdge(ctx, -w / 2, -h / 2, w, h);
     } else {
       // Fallback vettoriale: freccia verde con oblò + bordo glow.

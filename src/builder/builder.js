@@ -23,6 +23,7 @@ import {
   uniqueCustomId,
 } from '../data/customLevels.js';
 import { PlaytestPreview } from './playtest.js';
+import { VictoryPreview } from './victoryPreview.js';
 
 // Griglie + livelli del gioco per "Carica livello…".
 import { testedo } from '../data/testedo.js';
@@ -1016,6 +1017,41 @@ function closePreview() {
   previewOverlay.classList.remove('show');
 }
 
+// --- Anteprima vittoria (animazione di fine livello, VictoryAnim) -----------
+const victoryOverlay = document.getElementById('victoryOverlay');
+const victoryCanvas = document.getElementById('victoryCanvas');
+const victoryExit = document.getElementById('victoryExit');
+const btnVicReplay = document.getElementById('btnVicReplay');
+const btnVicArtie = document.getElementById('btnVicArtie');
+const btnVicMiles = document.getElementById('btnVicMiles');
+let victoryPreview = null;
+let victoryPlayerId = 'artie';
+
+function openVictoryPreview() {
+  victoryOverlay.classList.add('show');
+  setVictoryToggle(victoryPlayerId);
+  victoryPreview = new VictoryPreview(victoryCanvas, { playerId: victoryPlayerId });
+  victoryPreview.start();
+}
+
+function closeVictoryPreview() {
+  if (victoryPreview) { victoryPreview.destroy(); victoryPreview = null; }
+  victoryOverlay.classList.remove('show');
+}
+
+// Aggiorna lo stato attivo dei due bottoni del toggle Artie/Miles.
+function setVictoryToggle(id) {
+  victoryPlayerId = id;
+  btnVicArtie.classList.toggle('active', id === 'artie');
+  btnVicMiles.classList.toggle('active', id === 'miles');
+}
+
+// Cambia personaggio dell'anteprima (stelle Artie / note Miles) e rilancia.
+function setVictoryPlayer(id) {
+  setVictoryToggle(id);
+  if (victoryPreview) victoryPreview.setPlayer(id);
+}
+
 // --- Eventi -----------------------------------------------------------------
 function bindEvents() {
   canvas.addEventListener('pointerdown', (e) => {
@@ -1135,6 +1171,13 @@ function bindEvents() {
     if (confirm('Svuotare tutta la griglia?')) startNewLevel();
   });
   btnPreview.addEventListener('click', openPreview);
+  document.getElementById('btnVictoryPreview').addEventListener('click', openVictoryPreview);
+  victoryExit.addEventListener('click', closeVictoryPreview);
+  btnVicReplay.addEventListener('click', () => { if (victoryPreview) victoryPreview.replay(); });
+  btnVicArtie.addEventListener('click', () => setVictoryPlayer('artie'));
+  btnVicMiles.addEventListener('click', () => setVictoryPlayer('miles'));
+  // Tap/click sul canvas dell'anteprima = ripeti l'animazione.
+  victoryCanvas.addEventListener('pointerdown', () => { if (victoryPreview) victoryPreview.replay(); });
   btnPlay.addEventListener('click', openPlayModal);
   btnManage.addEventListener('click', openManageModal);
   document.getElementById('editBannerNew').addEventListener('click', () => {
@@ -1156,10 +1199,12 @@ function bindEvents() {
   document.getElementById('btnZoomIn').addEventListener('click', () => setZoom(zoom * ZOOM_STEP));
   document.getElementById('btnZoomOut').addEventListener('click', () => setZoom(zoom / ZOOM_STEP));
 
-  // ESC chiude l'anteprima (priorità), poi deseleziona, poi chiude la modale.
+  // ESC chiude prima l'anteprima vittoria, poi quella giocabile, poi deseleziona,
+  // poi chiude la modale.
   window.addEventListener('keydown', (e) => {
     if (e.code !== 'Escape') return;
-    if (previewOverlay.classList.contains('show')) closePreview();
+    if (victoryOverlay.classList.contains('show')) closeVictoryPreview();
+    else if (previewOverlay.classList.contains('show')) closePreview();
     else if (tool === 'select' && selRect) { clearSelection(); draw(); }
     else if (modal.classList.contains('show')) hideModal();
   });

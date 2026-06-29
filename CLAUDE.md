@@ -59,7 +59,7 @@ src/
     Input.js           Keyboard/mouse/touch → jump; held (continuous) + consumePress() (edge, used by orbs)
     Audio.js           Music: two looped tracks from `MUSIC_TRACKS` (public/ `home.m4a`/`game.mp3`, routed via `music` gain); `setTrack('home'|'game', {restart})` switches them (menus=home, playing=game; game restarts each attempt); `stopMusic()` pauses all tracks immediately (used on death). Falls back to a synth beat (BPM 128) if files are missing. Beat clock always runs for `beatPhase()` (visual pulse). SFX: coin is synth (`_tone`); **file-based one-shots** via `playSfxFile(key)` → bool (fetch→`decodeAudioData`→`AudioBufferSource`, buffers from `SFX_FILES` preloaded in `unlock()`) — the player-select "tag" sounds (`tag-artie`/`tag-miles`), the **death** sound (`death-artie`, `playDeath` falls back to the synth `_tone` if the buffer isn't decoded yet), and the **loader** jingle (`loader` = `tag-tutto-fatto.MP3`). `playSfxOnce(key, onEnded)` is the same pipeline but returns the buffer's `duration` and fires `onEnded` at the end (used by the fake loader to size/finish itself). Both routed via `sfx` gain (respect SFX volume + mute). Music can be silenced per-screen via `setMusicSilenced(bool)` — a `_musicScreenMul` (0/1) multiplied into the `music` gain (single writer `_applyMusicGain()`) WITHOUT touching the persisted `_musicVol`; `main.js` drives it from `gameState` (muted on `players` so the tags stand out). Persistent volume/mute
     Assets.js          Async image cache w/ vector fallback; getSkin(), LOGO_IMG/BG2_IMG/COIN_IMG/PALM_IMG/OPTIONS_IMG/STATS_IMG (all WebP), `getLevelBg(name)` (cached lazy loader for the heavy level bg WebPs `LA`/`metro`/`wash`/`boulevard`, not loaded on home), fontState (local `SoccerLeague` font via @font-face in index.html)
-    Analytics.js       Fail-silent telemetry (see §12): persists `userId` (`artie_uid` localStorage UUID), per-load `sessionId`, per-flush `batchId`; `/session` handshake → Bearer token; in-memory event buffer flushed every 30 s (≤200/batch, splits, backoff+jitter on 429/5xx, 413→smaller batches); unload via `navigator.sendBeacon` (token in body `_t`). No-op unless `VITE_ARTIE_SESSION_URL`/`VITE_ARTIE_INGEST_URL` are set; never awaited on the loop
+    Analytics.js       Fail-silent **anonymous** telemetry (see §12): no personal data — NO nickname, NO persistent device id. Only an **ephemeral** per-load `sessionId` (never stored in localStorage) + per-flush `batchId`; `/session` handshake → Bearer token; in-memory event buffer flushed every 30 s (≤200/batch, splits, backoff+jitter on 429/5xx, 413→smaller batches); unload via `navigator.sendBeacon` (token in body `_t`). No-op unless `VITE_ARTIE_SESSION_URL`/`VITE_ARTIE_INGEST_URL` are set; never awaited on the loop
   game/
     Player.js          Cube & Ship entity: gravity, jump, mode switch, collision resolution, rotation, render
     Level.js           Parses the tile grid → entity arrays (obstacles/portals/orbs/pads/coins); culled render()
@@ -72,10 +72,12 @@ src/
     Coin.js            Spinning collectible (max 5/level); handled in main.js handleCoins
   effects/
     Particles.js       Death burst (26 shards w/ gravity)
-    Trail.js           Player trail (cube red squares / ship luminous streak)
-    StarTrail.js       Ship thruster stars (deterministic jitter, no Math.random)
+    Trail.js           Player trail (cube squares / ship luminous streak); `render(renderer, cameraX, color, glow)` takes a per-player color+glow (default red; main.js passes `ply().fx.trail`/`.glow` → orange for Miles)
+    StarTrail.js       Ship thruster particles (deterministic jitter, no Math.random); per-player color+shape via `setStyle(color, shape)` — `shape: 'star'|'note'` dispatches `_starPath`/`_notePath` (Artie=yellow stars, Miles=yellow musical notes)
     RocketField.js     Rocket-mode background ambiance: drifting stars + warp speed lines (deterministic, no Math.random; intensity scaled by themeT, draws nothing in cube mode). Rendered behind gameplay in main.js
     PortalFx.js        Portal transit VFX: white flash + expanding wave + sparks
+    Fireworks.js       Spark bursts used by `VictoryAnim` (the victory explosion + fly-off trail): deterministic (no Math.random), SCREEN-space — `render(renderer)` takes NO cameraX. Per-player shape+color via `setStyle(color, shape)` (Artie=yellow stars, Miles=yellow notes) + colorful spark flecks, gentle gravity. Duplicates StarTrail's `_starPath`/`_notePath` (kept byte-identical)
+    VictoryAnim.js     **Shared** victory animation (state `victory` in main.js + the builder's "Anteprima vittoria"). Phase machine CHARGE→HOPS→LEAP→PAUSE→TEXT (`done`, ~3.9s): the player grows/charges (explosion at the peak), does `HOP_COUNT` hops each spinning 360°, then leaps in an arc to the upper-right spinning + shrinking and vanishes off-screen (spark trail along the arc), then "LIVELLO COMPLETATO!" pops in. The MOTION is a pure `_motion(t)`→`{scale,dx,dy,angle,visible}` used by BOTH render (draw) and update (trail position), so the trail follows the real arc. Owns its own `Fireworks`; draws the player by wrapping `player.render()` in an OUTER ctx translate/scale/**rotate** (no state mutation; the outer rotate spins both cube & ship), pinning screenX to PLAYER_X via `cameraX = player.x - PLAYER_X` (works in-game and in the builder where worldX=PLAYER_X). Tunable consts (`CHARGE_DUR`/`HOP_COUNT`/`HOP_HEIGHT`/`LEAP_TURNS`/`LEAP_RISE`/`LEAP_END_SCALE`/…). API: `start({player,fillBottom,color,shape})` · `update(dt)` · `render(renderer)` · `reset()` · `done`. Self-contained text (no main.js dep), deterministic (no Math.random)
     Background.js      Generic neon parallax grid (3 layers, beat pulse, theme lerp)
     CityBackground.js  Red skyline (procedural buildings, 3 tiers, clouds)
     LaBackground.js    Sunset beach (sun, palms, houses, ferris wheel, pier, lamp)
@@ -88,12 +90,13 @@ src/
   builder/
     builder.js         Internal Game Builder (level editor) wired from builder.html — see §13
     playtest.js        PlaytestPreview: embeds the real engine (GameLoop/Renderer/Player/Level/Camera) to PLAY the current grid in the builder ("Anteprima") — see §13
+    victoryPreview.js  VictoryPreview: plays the shared `VictoryAnim` over a static neutral scene in the builder ("Anteprima vittoria"), with an Artie/Miles toggle (stars/notes) + Ripeti/Esc — see §13
 builder.html           Standalone editor page (NOT part of the game); Vite multi-page entry, served at /builder.html
 ```
 
 ## 4. Core loop & state machine
 - Fixed timestep: `FIXED_DT = 1/60`, `MAX_FRAME_TIME = 0.25` (caps recovery after a freeze).
-- Game states (in `main.js`): `prehome` · `loader` · `home` · `players` · `levels` · `playing` · `complete` · `options` · `stats`.
+- Game states (in `main.js`): `prehome` · `loader` · `home` · `players` · `levels` · `playing` · `victory` · `complete` · `options` · `stats`.
 - **Pre-home (onboarding):** initial state. Shows the logo + a card with a **required** nickname
   field and a `GIOCA` button. **No music plays here** (`Audio._currentTrack` starts `null`, so the
   unlock-on-first-gesture loads files but plays nothing). The nickname uses a real `<input>` overlaid
@@ -116,6 +119,25 @@ builder.html           Standalone editor page (NOT part of the game); Vite multi
   (collect). On death: `audio.stopMusic()` (background music cuts immediately so only the death SFX
   is heard) + play SFX once, spawn particles, ~0.7s timer, then restart (which re-plays `game` from
   the top via `setTrack('game', {restart:true})`).
+- **Victory (esultanza):** on `player.x >= finishX` the win block (still firing `saveBestCoins` /
+  `commitRunStats` / `analytics.trackLevelClear` **exactly once**) calls
+  `victoryAnim.start({ player, fillBottom: lvl().obstacleBottom, color: ply().fx.star, shape: ply().fx.shape })`
+  and switches to `victory` (NOT straight to `complete`). The whole sequence lives in the **shared
+  `VictoryAnim` module** (`effects/VictoryAnim.js`, reused by the builder's "Anteprima vittoria"):
+  the world **freezes**, the player **grows/charges** in place (explosion of per-player sparks — Artie
+  stars / Miles notes, yellow — at the peak), does a couple of **hops each spinning 360°**, then
+  **leaps in an arc to the upper-right, spinning + shrinking, and vanishes off-screen** (spark trail
+  follows the arc), a brief pause, then "LIVELLO COMPLETATO!" pops in; `victoryAnim.done` (~3.9s) → `complete`.
+  State `victory` has its own early-returning block in `update(dt)` (after the `loader` block,
+  **before** the `playing` guard, so gameplay physics is frozen): `victoryAnim.update(dt)` + residual
+  `portalFx`/`starTrail`/`particles` updates, then `if (victoryAnim.done) gameState = 'complete'`.
+  `drawVictory()` draws the **frozen game scene** via `drawGameScene(camX, beatPulse, /*drawPlayer=*/false)`
+  (the player is suppressed there and drawn by `VictoryAnim`, which animates it via an outer ctx
+  transform) + a light veil + `victoryAnim.render(renderer)`, mobile-scaled with `pushUiScale()`.
+  **Music keeps playing** (no `stopMusic` in the win block, unlike death). No pause during `victory`
+  (pause/click handlers are gated on `playing`). `restart()` calls `victoryAnim.reset()`. (Future
+  hook: a `'victory'` entry in `SFX_FILES` + `audio.playSfxFile('victory')` in the win block — no-op
+  until the asset exists.)
 - **Pause:** `let isPaused` flag (reset in `restart()`). During `playing`, `Esc`/`P` or the round
   pause button (top-right, drawn by `drawPauseButton`) toggle it; `update(dt)` early-returns while
   paused so the world freezes but `render()` keeps drawing. Paused overlay (`drawPauseOverlay`) has
@@ -137,10 +159,30 @@ builder.html           Standalone editor page (NOT part of the game); Vite multi
   `withHover` directly. The cursor switches to `pointer` when `hoverHit` is set — applied at the top of
   `render()` and reset each frame (1-frame lag, imperceptible). Composes cleanly with `pushUiScale`
   because `uiScale()` is 1 on desktop (the only place hover runs).
-- **Desktop-only key hints:** every bottom-of-screen keyboard hint (`P = CUBO …`, `SPAZIO / CLICK …`,
-  `ESC = INDIETRO`, `FRECCIA / ESC …`, the player-select `← →` line) is wrapped in
-  `if (!mqCoarse.matches)` so it renders only on a fine pointer. On mobile there's no keyboard, and the
-  on-screen affordances (back arrow, big `COMING SOON`, tap-to-play) already convey the same thing.
+- **Credits footer (`#credits`):** DOM overlay in `index.html` (styled inline, UI palette + `SoccerLeague`
+  font, CSP-safe — external `<a>` navigation isn't subject to the CSP) with two clickable links
+  ("Designed by **Strangecollabo**" → instagram.com/strangecollabo, "Developed by **Twigo Lab**" →
+  instagram.com/twigolab, `target="_blank" rel="noopener"`). Drawn discreetly (semi-transparent white
+  text + dim-yellow links, full-yellow on hover) bottom-center, safe-area-aware. `pointer-events:none`
+  on the container with `pointer-events:auto` only on the links, so taps around the text fall through to
+  the canvas. `updateCredits()` (called from `render()` and `onOrientationChange()`, mirrors
+  `updateInstallHint`) toggles `block`/`none`: visible in **all menus**, hidden during `playing` (so it
+  never disturbs the game) and while `orientationBlocked` (portrait — `#rotate` wins). z-index 8 (under
+  `#installHint`=9, `#rotate`=10). NOT scaled by `uiScale()` — a fixed DOM element with a `clamp()`
+  font-size, like `#installHint`. (There are **no** desktop-only on-canvas key hints anymore — the old
+  `P = CUBO …`/`SPAZIO / CLICK …` legend was removed from every menu draw.)
+- **Info / disclaimer overlay (`#infoLink` + `#infoOverlay`):** a discreet **"Info"** link bottom-**right**
+  (`#infoLink`, same dim-yellow look as `#credits`, z-index 8, safe-area-aware) opens a modal DOM overlay
+  (`#infoOverlay`, z-index 11 — above everything) with the legal disclaimer (OG DASH is independent, not
+  affiliated with RobTop Games / Geometry Dash, original assets, etc.). The overlay is a fullscreen flex
+  backdrop + a centered scrollable card (`.info-card`, `rgba(20,16,46,0.96)` + yellow border, like
+  `#installHint`; long text wraps/scrolls natively — that's why it's DOM, not a canvas screen). State is a
+  plain boolean `infoOpen` (NOT a `gameState` value, to avoid the 10th state + canvas dispatch): the link
+  calls `openInfo()`, and ✕ (`#infoClose`) / **Esc** (handled at the top of the keydown handler, priority
+  over per-state transitions) / **click on the backdrop** call `closeInfo()`. `updateInfoLink()` (called
+  from `render()` and `onOrientationChange()`, mirrors `updateCredits`) shows the link only in menus
+  (hidden in `playing`/portrait) and **auto-closes the overlay** if we end up in `playing`/portrait while
+  it's open. CSP-safe (no `_headers` change).
 - **Force landscape (portrait block):** on touch devices held in portrait the game freezes and a
   DOM overlay `#rotate` (in `index.html`, styled in the inline `<style>` with the UI palette +
   `SoccerLeague` font + a CSS-animated phone glyph — no asset, CSP-safe) covers everything incl. the
@@ -184,10 +226,11 @@ builder.html           Standalone editor page (NOT part of the game); Vite multi
   drawn and hit-tested on `players`/`levels`/`options`/`stats` → returns to `home`. On `levels`/`players`
   the arrow is checked first (priority over "click = play"/select).
 - **Persistence (localStorage):** `gd_bestCoins` (per-level coin record), `gd_levelStats`
-  (per-level bestPct/attempts/jumps), `gd_nickname` (player nickname), `artie_uid` (telemetry
-  `userId`, a persistent UUID v4 per device — see §12), `gd_customLevels` (levels created in the
+  (per-level bestPct/attempts/jumps), `gd_nickname` (player nickname — local only, **never sent** to
+  telemetry; see §12), `gd_customLevels` (levels created in the
   Game Builder and saved into the game — array of self-contained level entries; loaded at startup by
-  `loadCustomLevels()` and appended to `LEVELS`/`MAPS`; see §13). **Audio is NOT persisted:**
+  `loadCustomLevels()` and appended to `LEVELS`/`MAPS`; see §13). **No `artie_uid`** — the anonymous
+  telemetry uses no persistent device id. **Audio is NOT persisted:**
   it ALWAYS starts ON at 50%/50% unmuted on every launch (desktop + mobile). `getSettings()` returns
   the config defaults (`MUSIC_VOLUME`/`SFX_VOLUME`/false) ignoring localStorage; `saveSettings()` is a
   no-op; `init()` clears any legacy `gd_audio` key. Options volume/mute changes apply to the current
@@ -224,8 +267,8 @@ builder.html           Standalone editor page (NOT part of the game); Vite multi
   `audio.setTrack` calls in `main.js`).
 - **Telemetry wiring (fail-silent, off the critical path — full contract in §12):** the `analytics`
   singleton (`engine/Analytics.js`) is fed from six game seams in `main.js`, each a single call:
-  `goHome()`→`session_start` (`analytics.start(nickname)`, also starts the 30 s flush timer + token
-  handshake), `startLevel()`→`level_select`, `restart()`→`level_start` (also captures the per-attempt
+  `goHome()`→`session_start` (`analytics.start()` — no args, anonymous; also starts the 30 s flush
+  timer + token handshake), `startLevel()`→`level_select`, `restart()`→`level_start` (also captures the per-attempt
   start time for `elapsedMs`), the one-time death frame in `update()`→`death` (with `progressPct =
   Math.round(bestRunPct*100)`), the `player.x >= finishX` clear in `update()`→`level_clear`, and the
   page-unload listeners (`visibilitychange`→hidden + `pagehide` after `loop.start()`)→`session_end`
@@ -396,7 +439,17 @@ is a flat array.)
 (Carousel order = `LEVELS` order: TESTEDO → City → Car Wash → Los Angeles → Boulevard → Metro. All share
 the testedo grid until real paths are built; only the visuals differ.)
 
-- **Players (skins only, identical physics):** `Artie` (`/artie-cube.png`), `Miles` (`/miles-cubo.png`).
+- **Players (skins only, identical physics):** each `PLAYERS` entry carries BOTH a cube skin
+  (`skin`) AND a ship/razzo skin (`ship`): `Artie` (`/artie-cube.webp` + `/dodge-artie.webp`),
+  `Miles` (`/miles-cubo.webp` + `/miles-razzo.png`). `main.js` sets both per-player on
+  `startLevel()`/`init()` via `player.setSkin(getSkin(ply().skin))` +
+  `player.setShipSkin(getSkin(ply().ship))`; `Player._renderShip` draws `this.shipSkin`
+  (default = global `SHIP_IMG` fallback). Both are preloaded in `Assets.js`. Each entry also
+  has an `fx` block — the **per-player trail look**: `{trail, glow, star, shape}`. `Artie` =
+  red smoke (`#ff3b3b`/`#ff2a2a`) + yellow `star`s; `Miles` = orange smoke (`#ff8a1e`/`#ff6a00`)
+  + yellow musical `note`s. `main.js` applies it on `startLevel()`/`init()` via
+  `starTrail.setStyle(ply().fx.star, ply().fx.shape)` and `trail.render(…, ply().fx.trail,
+  ply().fx.glow)`. (The home/menu decorative cube trail stays red — Trail's defaults.)
 - **Themes:** neon (`THEME_CUBE/SHIP`), city (`CITY_CUBE/SHIP`), LA (`LA_CUBE/SHIP`), metro (`METRO_CUBE/SHIP`).
   `CITY_*`/`METRO_*` are currently unused by `LEVELS` (kept for reference).
 
@@ -430,23 +483,26 @@ the testedo grid until real paths are built; only the visuals differ.)
   validator now lives in `src/data/validate.js`, shared with `check-levels.mjs` — edit it there once).
 
 ## 12. Telemetry / Analytics (`engine/Analytics.js`)
-Directional gameplay analytics. **`FRONTEND_INTEGRATION.md` is the authoritative contract**; this
-section summarizes the implementation. The backend is two AWS Lambda Function URLs (eu-central-1):
+Directional gameplay analytics, **anonymous by design** — no personal data leaves the device: NO
+nickname, NO persistent device id, only an ephemeral per-session pseudonym (`sessionId`). The backend
+is meant to keep aggregate stats. The backend is two AWS Lambda Function URLs (eu-central-1):
 a `/session` handshake and an `/ingest` endpoint, **reached via Cloudflare-proxied subdomains**
 (`session.<domain>` / `ingest.<domain>`) — NOT the direct `*.lambda-url.…on.aws` URLs, which are
 **origin-locked and return 403**. (`<domain>` is a placeholder `artie.example` until the backend
 provides the real proxied domain; swap it in `.env*` + `_headers` together.)
 
-- **Identity:** `userId` = persistent UUID v4 in localStorage (`artie_uid`); `sessionId` = fresh UUID
-  per page load (= per play session); `batchId` = fresh UUID per flush (server dedups on it).
-- **Handshake:** at `session_start`, POST `{userId, sessionId}` to `VITE_ARTIE_SESSION_URL` → `{token,
+- **Identity (anonymous):** the ONLY identifier is `sessionId` = fresh UUID per page load (= per play
+  session), **ephemeral, never written to localStorage**, so it can't track a device over time or be
+  tied to a person. `batchId` = fresh UUID per flush (server dedups on it). **No `userId`/`artie_uid`,
+  no `nickname`** — the nickname stays local (`gd_nickname`) for the UI only and is never transmitted.
+- **Handshake:** at `session_start`, POST `{sessionId}` to `VITE_ARTIE_SESSION_URL` → `{token,
   exp}`. The token rides as `Authorization: Bearer <token>` on every ingest POST; refreshed near `exp`
   (60 s skew) and once on a `401`.
 - **Batching:** events accumulate in memory and flush **once every 30 s** (one POST per ≤200 events;
   a bigger window splits into multiple POSTs). Each event is `ts`-stamped at emission, so the buffer
   is chronological; failed batches are re-queued **at the front** (`unshift`) to preserve order. Retry
   with backoff+jitter on `429`/`5xx`; `413`→retry with smaller batches; `400`/`403`→drop. Payload shape
-  is **exact** (no extra fields): `{schemaVersion:1, batchId, sessionId, userId, nickname, clientSentAt,
+  is **exact** (no extra fields): `{schemaVersion:1, batchId, sessionId, clientSentAt,
   events:[…]}`. Events: `session_start | level_select | level_start | death | level_clear | session_end`
   (see §4 for which game seam emits which; `death` carries `progressPct` 0–100 + `elapsedMs`).
 - **Unload:** `visibilitychange`→hidden + `pagehide` push `session_end` and flush via
@@ -521,6 +577,17 @@ game runtime.
   teardown). Esc / "Esci" → `destroy()` (stops the rAF + unbinds). Cosmetic effects (particles/trail/
   bg) are omitted — a solid backdrop + floor line is enough to test feel. Throwaway: previewing saves
   nothing. Enabled only when the level is **valid** (shares `runValidation()`'s `ok` via `lastValid`).
+- **Anteprima vittoria (preview the victory animation):** "Anteprima vittoria" opens a SEPARATE
+  full-screen overlay (`#victoryOverlay`, distinct from `#previewOverlay` which is bound to
+  `PlaytestPreview`) that plays the **shared `VictoryAnim`** (the exact in-game victory sequence —
+  grow→fly-off→text) over a static neutral scene, via `src/builder/victoryPreview.js`
+  (`VictoryPreview`). So tweaking `VictoryAnim` can be tested without replaying a level. It owns its
+  own `Renderer`/`GameLoop` + a `Player` (skin loaded via `getSkin`), and imports `PLAYERS` (the
+  builder has no player selection): an **Artie/Miles toggle** (`#btnVicArtie`/`#btnVicMiles`, the
+  active one gets `.btn.active`) switches the cube skin + spark shape (stars vs notes) and replays.
+  **Ripeti** (or a tap/click on the canvas) replays; **Esc** / "Esci" → `destroy()` (stops the rAF).
+  It never goes to `complete` — it holds the final text frame until Ripeti/Esc. Always available
+  (no validity gate — it's a cosmetic preview).
 - **Salva nel gioco (play in the real game) — create OR update:** "Salva nel gioco" (green) saves the
   level **into the game** so it's instantly playable — no code edit. It writes a self-contained entry to
   localStorage `gd_customLevels` via **`src/data/customLevels.js`** (shared module, like `validate.js`):

@@ -18,6 +18,7 @@ import { Trail } from './effects/Trail.js';
 import { StarTrail } from './effects/StarTrail.js';
 import { RocketField } from './effects/RocketField.js';
 import { PortalFx } from './effects/PortalFx.js';
+import { VictoryAnim } from './effects/VictoryAnim.js';
 import { Background } from './effects/Background.js';
 import { CityBackground } from './effects/CityBackground.js';
 import { ImageBackground } from './effects/ImageBackground.js';
@@ -157,6 +158,7 @@ const trail = new Trail();
 const starTrail = new StarTrail();
 const rocketField = new RocketField(); // atmosfera di sfondo in modalità razzo
 const portalFx = new PortalFx();
+const victoryAnim = new VictoryAnim(); // animazione di vittoria (grow -> fly -> testo)
 
 // Tempo accumulato (per la pulsazione/rotazione dei portali).
 let elapsed = 0;
@@ -198,10 +200,13 @@ function themeFor(t) {
   };
 }
 
-// Stato schermate: 'prehome' | 'loader' | 'home' | 'players' | 'levels' | 'playing'.
+// Stato schermate: 'prehome' | 'loader' | 'home' | 'players' | 'levels' |
+// 'playing' | 'victory' | 'complete' | 'options' | 'stats'.
 // 'prehome' è la schermata d'ingresso (nickname + Gioca, senza musica): si parte
 // da qui. Premendo Gioca si passa a 'loader' (fake loader col jingle
 // 'tag-tutto-fatto') e, a fine suono, a 'home' dove parte la musica.
+// 'victory' è l'esultanza animata (fuochi + "LIVELLO COMPLETATO") tra il
+// raggiungimento del traguardo e lo schermo 'complete'.
 let gameState = 'prehome';
 
 // Nickname del giocatore (richiesto nella pre-home, persistito in localStorage).
@@ -240,6 +245,9 @@ let finishX = level.widthPx;
 let attempts = 1;
 let deathTimer = 0;
 const RESPAWN_DELAY = 0.7;
+
+// Esultanza di vittoria (stato 'victory'): tutta la logica timer/fasi/effetti è
+// nel modulo condiviso VictoryAnim (riusato anche dall'anteprima del builder).
 
 // Tema sfondo: 0 = cube, 1 = ship. themeT insegue themeTarget.
 let themeT = 0;
@@ -288,6 +296,8 @@ function startLevel() {
   finishX = level.widthPx;
   camera.setSpeed(lvl().scrollSpeed);
   player.setSkin(getSkin(ply().skin));
+  player.setShipSkin(getSkin(ply().ship));
+  starTrail.setStyle(ply().fx.star, ply().fx.shape); // particellare razzo per-player
   gameState = 'playing';
   analytics.trackLevelSelect(levelIndex + 1); // livello scelto (1-indexed per backend)
   attempts = 1;
@@ -303,6 +313,7 @@ function restart() {
   particles.clear();
   starTrail.clear();
   deathTimer = 0;
+  victoryAnim.reset(); // azzera l'esultanza (riparte al prossimo traguardo)
   themeTarget = 0; // torna al tema cube
   lastPortal = null;
   lastPad = null;
@@ -332,6 +343,11 @@ function playTag(index) {
 
 // --- Input delle schermate (home / players / levels) ------------------------
 window.addEventListener('keydown', (e) => {
+  // Overlay "Info" aperto: Esc lo chiude e basta (priorità sulle transizioni sotto).
+  if (infoOpen) {
+    if (e.code === 'Escape') closeInfo();
+    return;
+  }
   if (gameState === 'prehome') {
     // Invio avvia se c'è un nickname. Quando il focus è sull'<input>, l'Enter è
     // già gestito dal suo listener: qui copriamo solo il caso senza focus.
@@ -602,6 +618,8 @@ if (window.visualViewport) {
 
 function init() {
   player.setSkin(getSkin(ply().skin));
+  player.setShipSkin(getSkin(ply().ship));
+  starTrail.setStyle(ply().fx.star, ply().fx.shape);
   // Rimuove eventuali impostazioni audio legacy: non vengono più usate né salvate
   // (l'audio parte sempre a 50% ON, vedi getSettings/saveSettings).
   try { localStorage.removeItem('gd_audio'); } catch {}
@@ -652,6 +670,19 @@ function update(dt) {
     // reale appena il suono parte). Il +0.05 evita un taglio netto dell'anello.
     const cap = loaderPending ? LOADER_PENDING_CAP : loaderDur + 0.05;
     if (loaderDone || loaderT >= cap) enterHome();
+    return;
+  }
+
+  // Esultanza vittoria: il player cresce, esplode, vola via, poi il testo
+  // (tutto in VictoryAnim), infine -> 'complete'. Blocco con early-return, come
+  // 'loader'. Sta PRIMA del guard 'playing' qui sotto, così la fisica di gioco
+  // non gira durante l'esultanza (mondo congelato).
+  if (gameState === 'victory') {
+    victoryAnim.update(dt);
+    portalFx.update(dt); // scintille residue del passaggio
+    starTrail.update(dt); // stelle residue del razzo
+    particles.update(dt);
+    if (victoryAnim.done) gameState = 'complete';
     return;
   }
 
@@ -725,13 +756,26 @@ function update(dt) {
     particles.burst(player.x + player.size / 2, player.y + player.size / 2, attempts);
   }
 
-  // Fine livello -> schermo di completamento. Salva record monete e stats
-  // (tentativo completato: +1, salti della run, 100% di percorso).
+  // Fine livello -> esultanza, poi schermo di completamento. Salva record monete
+  // e stats (tentativo completato: +1, salti della run, 100% di percorso). Queste
+  // tre chiamate scattano UNA sola volta: lo switch a 'victory' impedisce al
+  // guard 'playing' di rieseguire questo blocco nei frame successivi.
   if (player.x >= finishX) {
     saveBestCoins(lvl().id, coinsCollected);
     commitRunStats(lvl().id, runJumps, 1);
     analytics.trackLevelClear(levelIndex + 1, attempts); // livello completato
-    gameState = 'complete';
+    // Esultanza prima dello schermo di completamento: il player cresce, esplode e
+    // vola via (scintille per-player: stelle Artie / note Miles, gialle), poi il
+    // testo. La musica del livello CONTINUA (niente stopMusic qui).
+    victoryAnim.start({
+      player,
+      fillBottom: lvl().obstacleBottom,
+      color: ply().fx.star,
+      shape: ply().fx.shape,
+    });
+    gameState = 'victory';
+    // (Hook futuro: audio.playSfxFile('victory') se un jingle verrà aggiunto a
+    // SFX_FILES — no-op se l'asset non c'è / non è ancora decodificato.)
   }
 }
 
@@ -947,6 +991,10 @@ function render(alpha) {
 
   // Banner "Aggiungi a Home": visibile solo nei menu d'ingresso, in landscape.
   updateInstallHint();
+  // Footer crediti: visibile nei menu, nascosto in gioco.
+  updateCredits();
+  // Link "Info": visibile nei menu, nascosto in gioco (chiude l'overlay se serve).
+  updateInfoLink();
 
   if (gameState === 'prehome') return drawPreHome();
   if (gameState === 'loader') return drawLoader();
@@ -955,6 +1003,7 @@ function render(alpha) {
   if (gameState === 'levels') return drawLevels();
   if (gameState === 'options') return drawOptions();
   if (gameState === 'stats') return drawStats();
+  if (gameState === 'victory') return drawVictory();
   if (gameState === 'complete') return drawComplete();
 
   // gameState === 'playing'
@@ -963,6 +1012,23 @@ function render(alpha) {
   const camX = player.alive ? camera.x + camera.speed * FIXED_DT * alpha : camera.x;
 
   const beatPulse = beatPulseValue();
+  drawGameScene(camX, beatPulse); // sfondo + atmosfera + mondo + scie + player
+
+  drawHud();
+  drawProgressBar();
+
+  portalFx.renderFlash(renderer); // lampo a tutto schermo (sopra al gameplay)
+
+  // Tastino pausa / overlay di pausa (sopra a tutto).
+  if (isPaused) drawPauseOverlay();
+  else drawPauseButton();
+}
+
+// Scena di gioco (sfondo + atmosfera razzo + mondo + scie + player + particelle).
+// Condivisa tra il render 'playing' e l'esultanza 'victory' (camera congelata).
+// drawPlayer=false durante l'esultanza: il player (ingrandito/in volo) lo disegna
+// VictoryAnim sopra alla scena congelata.
+function drawGameScene(camX, beatPulse, drawPlayer = true) {
   currentBg().render(renderer, camX, beatPulse, themeFor(themeT));
 
   // Atmosfera razzo DIETRO al gameplay: stelle + linee di velocità (solo se in
@@ -977,22 +1043,39 @@ function render(alpha) {
   portalFx.render(renderer, camX); // onda d'urto + scintille del passaggio
   // Il player resta pinnato a PLAYER_X: lo disegno con la camera NON interpolata
   // (player.x = camera.x + PLAYER_X), così non vibra mentre il mondo scorre liscio.
-  trail.render(renderer, camera.x); // scia ancorata al player
+  trail.render(renderer, camera.x, ply().fx.trail, ply().fx.glow); // scia per-player
   starTrail.render(renderer, camera.x); // stelle ancorate al player
-  if (player.alive) player.render(renderer, camera.x, fillBottom);
+  if (drawPlayer && player.alive) player.render(renderer, camera.x, fillBottom);
   particles.render(renderer, camX);
 
   // Velo + vignette colorata SOPRA al gameplay quando il razzo è attivo.
   drawRocketAmbiance(themeT, beatPulse);
+}
 
-  drawHud();
-  drawProgressBar();
+// Esultanza di vittoria: scena CONGELATA (camera ferma al traguardo, SENZA il
+// player) + animazione VictoryAnim sopra (player che cresce/vola + scintille + testo).
+function drawVictory() {
+  const camX = camera.x; // mondo fermo: niente interpolazione
+  const beatPulse = beatPulseValue();
+  drawGameScene(camX, beatPulse, false); // player disegnato da VictoryAnim
 
-  portalFx.renderFlash(renderer); // lampo a tutto schermo (sopra al gameplay)
+  // Velo leggero per dare risalto all'animazione (NON screenBackdrop: la scena
+  // di gioco deve restare visibile sotto).
+  const ctx = renderer.ctx;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(
+    renderer.extLeft,
+    renderer.extTop,
+    renderer.extRight - renderer.extLeft,
+    renderer.extBottom - renderer.extTop
+  );
+  ctx.restore();
 
-  // Tastino pausa / overlay di pausa (sopra a tutto).
-  if (isPaused) drawPauseOverlay();
-  else drawPauseButton();
+  // Animazione (player grow/fly + scintille + testo), mobile-scaled come le altre schermate.
+  pushUiScale();
+  victoryAnim.render(renderer);
+  popUiScale();
 }
 
 // Velo tinta + vignette ai bordi quando il cubo è razzo (alpha ∝ themeT).
@@ -1386,7 +1469,7 @@ function drawHomeCube() {
 // nello stato 'loader'. La home (e la sua musica) si aprono a fine suono, via
 // update(). L'AudioContext è già sbloccato dal click/tasto su Gioca.
 function goHome() {
-  analytics.start(nickname); // avvia sessione telemetria + evento session_start
+  analytics.start(); // avvia sessione telemetria anonima + evento session_start
   nickInput.style.display = 'none';
   nickInput.blur();
   // Assicura l'AudioContext sbloccato PRIMA del play: il listener globale di unlock
@@ -1553,9 +1636,6 @@ function drawPreHome() {
   const enabled = nickname.length > 0;
   button(r.play, 'GIOCA', enabled ? UI.green : 'rgba(120,120,130,0.6)');
 
-  // Hint in basso.
-  text('Premi INVIO per giocare', cx, LOGICAL_HEIGHT - 46, 18, 'rgba(255,255,255,0.85)');
-
   popUiScale();
 
   // Mostra e allinea l'<input> sopra la cornice del campo (positionNickInput applica
@@ -1601,11 +1681,6 @@ function drawHome() {
   // withHover: leggero zoom al passaggio del mouse su desktop (no-op su touch).
   if (OPTIONS_IMG.ready) withHover(b.options, () => ctx.drawImage(OPTIONS_IMG.img, b.options.x, b.options.y, b.options.w, b.options.h));
   if (STATS_IMG.ready) withHover(b.stats, () => ctx.drawImage(STATS_IMG.img, b.stats.x, b.stats.y, b.stats.w, b.stats.h));
-
-  // Suggerimenti tasti solo su desktop (su mobile non c'è tastiera).
-  if (!mqCoarse.matches) {
-    text('P = CUBO   •   O = OPZIONI   •   S = STATS', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
-  }
 
   popUiScale();
 }
@@ -1709,15 +1784,6 @@ function drawLevels() {
   // Freccia "indietro" in alto a sinistra.
   arrow(backArrowRect(), -1, UI.yellow);
 
-  // Suggerimenti tasti solo su desktop (su mobile non c'è tastiera; "COMING SOON"
-  // è già mostrato in grande sul pannello, quindi nulla va perso).
-  if (!mqCoarse.matches) {
-    const hint = L.comingSoon
-      ? 'PROSSIMAMENTE   •   ESC INDIETRO'
-      : 'SPAZIO / CLICK PER GIOCARE   •   ESC INDIETRO';
-    text(hint, LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
-  }
-
   popUiScale();
 }
 
@@ -1758,11 +1824,6 @@ function drawComplete() {
     22,
     UI.yellow
   );
-
-  // Suggerimenti tasti solo su desktop (su mobile si tocca lo schermo per rigiocare).
-  if (!mqCoarse.matches) {
-    text('SPAZIO / CLICK = RIGIOCA   •   ESC = MENU', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
-  }
 
   popUiScale();
 }
@@ -1819,11 +1880,6 @@ function drawOptions() {
 
   // Freccia "indietro" in alto a sinistra (coerente con le altre schermate).
   arrow(backArrowRect(), -1, UI.yellow);
-
-  // Suggerimento tasto solo su desktop (su mobile c'è la freccia "indietro").
-  if (!mqCoarse.matches) {
-    text('ESC = INDIETRO', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 36, 20, 'rgba(255,255,255,0.9)');
-  }
 
   popUiScale();
 }
@@ -1888,11 +1944,6 @@ function drawStats() {
     textAligned(row[1], px + pw - 36, ty, 30, 'right', '#fff');
   });
   ctx.restore();
-
-  // Suggerimento tasto solo su desktop (su mobile c'è la freccia "indietro").
-  if (!mqCoarse.matches) {
-    text('FRECCIA / ESC = INDIETRO', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 40, 20, 'rgba(255,255,255,0.9)');
-  }
 
   popUiScale();
 }
@@ -1977,11 +2028,6 @@ function drawPlayers() {
 
   // Freccia "indietro" in alto a sinistra.
   arrow(backArrowRect(), -1, UI.yellow);
-
-  // Suggerimenti tasti solo su desktop (su mobile si tocca il cubo per scegliere).
-  if (!mqCoarse.matches) {
-    text('←  →  / CLICK PER SCEGLIERE   •   SPAZIO PER CONFERMARE', LOGICAL_WIDTH / 2, LOGICAL_HEIGHT - 50, 22, 'rgba(255,255,255,0.9)');
-  }
 
   popUiScale();
 }
@@ -2440,6 +2486,10 @@ function roundRect(ctx, x, y, w, h, r) {
 // Safari (non gia' in standalone), per spingere all'installazione. In standalone il
 // banner non serve.
 const installHintEl = document.getElementById('installHint');
+const creditsEl = document.getElementById('credits');
+const infoLinkEl = document.getElementById('infoLink');
+const infoOverlayEl = document.getElementById('infoOverlay');
+let infoOpen = false;
 
 function isIos() {
   const ua = navigator.userAgent || '';
@@ -2466,6 +2516,54 @@ function updateInstallHint() {
   if (installHintEl.style.display !== next) installHintEl.style.display = next;
 }
 
+// Footer crediti: visibile in tutti i menu, nascosto in gioco ('playing', per non
+// disturbare l'azione) e in portrait-block (lì comanda l'overlay #rotate).
+function updateCredits() {
+  if (!creditsEl) return;
+  const show = !orientationBlocked && gameState !== 'playing';
+  const next = show ? 'block' : 'none';
+  if (creditsEl.style.display !== next) creditsEl.style.display = next;
+}
+
+// Overlay "Info"/disclaimer legale: aperto dal link in basso a destra, chiuso da
+// ✕ / Esc / click sul backdrop. Stato in `infoOpen`; idempotente sul display.
+function openInfo() {
+  infoOpen = true;
+  if (infoOverlayEl) infoOverlayEl.style.display = 'flex';
+}
+function closeInfo() {
+  infoOpen = false;
+  if (infoOverlayEl) infoOverlayEl.style.display = 'none';
+}
+
+// Link "Info": visibile come i crediti (nei menu, nascosto in gioco e in portrait-block).
+// Se l'overlay è aperto ma siamo finiti in gioco/portrait, lo chiude (non resta appeso).
+function updateInfoLink() {
+  if (infoOpen && (orientationBlocked || gameState === 'playing')) closeInfo();
+  if (!infoLinkEl) return;
+  const show = !orientationBlocked && gameState !== 'playing';
+  const next = show ? 'block' : 'none';
+  if (infoLinkEl.style.display !== next) infoLinkEl.style.display = next;
+}
+
+// Wiring overlay "Info": apre dal link in basso a destra, chiude da ✕ / backdrop.
+// (Esc è gestito in cima all'handler keydown; questi sono click/tap DOM, sopra il canvas.)
+const infoOpenEl = document.getElementById('infoOpen');
+const infoCloseEl = document.getElementById('infoClose');
+if (infoOpenEl) {
+  infoOpenEl.addEventListener('click', (e) => {
+    e.preventDefault(); // href="#" non deve navigare
+    openInfo();
+  });
+}
+if (infoCloseEl) infoCloseEl.addEventListener('click', closeInfo);
+if (infoOverlayEl) {
+  // Click sul backdrop (fuori dalla card) chiude; click sulla card no.
+  infoOverlayEl.addEventListener('click', (e) => {
+    if (e.target === infoOverlayEl) closeInfo();
+  });
+}
+
 // --- Wiring orientamento: overlay "ruota il telefono" + freeze ---------------
 const rotateEl = document.getElementById('rotate');
 function onOrientationChange() {
@@ -2479,6 +2577,8 @@ function onOrientationChange() {
   if (rotateEl) rotateEl.style.display = blocked ? 'flex' : 'none';
   if (gameState === 'prehome') positionNickInput(); // riallinea l'input al ritorno landscape
   updateInstallHint(); // nascondi/mostra il banner col cambio orientamento
+  updateCredits(); // nascondi/mostra il footer crediti col cambio orientamento
+  updateInfoLink(); // nascondi/mostra il link Info (e chiudi l'overlay se serve)
   input.consumePress(); // scarta eventuali edge accumulati durante il blocco
 }
 mqPortrait.addEventListener('change', onOrientationChange);

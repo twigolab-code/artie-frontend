@@ -34,17 +34,19 @@ export class Trail {
     if (this.samples.length > TRAIL_LENGTH) this.samples.pop();
   }
 
-  render(renderer, cameraX) {
+  // color/glow: look della scia per-player (default = rosso, vedi PLAYERS.fx in
+  // main.js). Il cubo decorativo della home usa i default (resta rosso).
+  render(renderer, cameraX, color = TRAIL_CUBE_COLOR, glow = TRAIL_RED_GLOW) {
     const ctx = renderer.ctx;
     const n = this.samples.length;
     if (n === 0) return;
 
-    // RAZZO: striscia rossa luminosa continua attraverso i campioni 'ship'.
+    // RAZZO: striscia luminosa continua attraverso i campioni 'ship'.
     if (this.samples[0].mode === 'ship') {
-      this._redStreak(ctx, cameraX);
+      this._redStreak(ctx, cameraX, color, glow);
     }
 
-    // CUBO: quadratini rossi (solo per i campioni in modalità cubo).
+    // CUBO: quadratini colorati (solo per i campioni in modalità cubo).
     for (let i = 0; i < n; i++) {
       const s = this.samples[i];
       if (s.mode === 'ship') continue;
@@ -54,15 +56,15 @@ export class Trail {
       ctx.globalAlpha = 0.3 * t;
       ctx.translate(s.x - cameraX + s.size / 2, s.y + s.size / 2);
       ctx.rotate(s.angle);
-      ctx.fillStyle = TRAIL_CUBE_COLOR;
+      ctx.fillStyle = color;
       ctx.fillRect(-half, -half, half * 2, half * 2);
       ctx.restore();
     }
     ctx.globalAlpha = 1;
   }
 
-  // Striscia rossa luminosa che si assottiglia e sfuma verso la coda.
-  _redStreak(ctx, cameraX) {
+  // Striscia luminosa che si assottiglia e sfuma verso la coda.
+  _redStreak(ctx, cameraX, color, glow) {
     const pts = [];
     for (const s of this.samples) {
       if (s.mode !== 'ship') break; // solo il segmento ship recente
@@ -73,13 +75,13 @@ export class Trail {
     ctx.save();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.shadowColor = TRAIL_RED_GLOW;
+    ctx.shadowColor = glow;
     ctx.shadowBlur = 18;
     // Disegna segmenti con larghezza/alpha decrescenti verso la coda.
     for (let i = 0; i < pts.length - 1; i++) {
       const t = 1 - i / pts.length;
       ctx.globalAlpha = 0.55 * t;
-      ctx.strokeStyle = TRAIL_CUBE_COLOR;
+      ctx.strokeStyle = color;
       ctx.lineWidth = 26 * t + 4;
       ctx.beginPath();
       ctx.moveTo(pts[i].x, pts[i].y);

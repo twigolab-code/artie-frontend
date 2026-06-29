@@ -213,6 +213,115 @@
         border-top: 2px solid #ffd23f;
         transform: rotate(45deg);
       }
+
+      /* Footer crediti: discreto, in basso al centro, in trasparenza per non
+         disturbare l'interfaccia. Mostrato/nascosto via JS nei menu (updateCredits).
+         z-index 8 (sotto #installHint=9 e #rotate=10, sopra il canvas). I tap passano
+         al canvas tranne sui link. */
+      #credits {
+        display: none; /* attivato in JS -> 'block' nei menu */
+        position: fixed;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+        z-index: 8;
+        pointer-events: none; /* il testo non blocca i tap sul canvas */
+        text-align: center;
+        white-space: nowrap;
+        font-family: 'SoccerLeague', system-ui, sans-serif;
+        font-size: clamp(11px, 2.4vw, 15px);
+        letter-spacing: 0.5px;
+        color: rgba(255, 255, 255, 0.45);
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+      }
+      #credits a {
+        pointer-events: auto; /* solo i link sono cliccabili */
+        color: rgba(255, 210, 63, 0.7); /* #ffd23f attenuato */
+        text-decoration: none;
+        transition: color 0.15s ease;
+      }
+      #credits a:hover {
+        color: #ffd23f;
+      }
+
+      /* Link "Info" in basso a destra (apre il disclaimer). Stile coerente con #credits. */
+      #infoLink {
+        display: none; /* attivato in JS -> 'block' nei menu (updateInfoLink) */
+        position: fixed;
+        right: calc(10px + env(safe-area-inset-right, 0px));
+        bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+        z-index: 8;
+        font-family: 'SoccerLeague', system-ui, sans-serif;
+        font-size: clamp(11px, 2.4vw, 15px);
+        letter-spacing: 0.5px;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+      }
+      #infoLink a {
+        color: rgba(255, 210, 63, 0.7); /* #ffd23f attenuato, come i crediti */
+        text-decoration: none;
+        transition: color 0.15s ease;
+      }
+      #infoLink a:hover {
+        color: #ffd23f;
+      }
+
+      /* Overlay disclaimer: backdrop scuro + card centrata scrollabile. z-index 11 (sopra tutto). */
+      #infoOverlay {
+        display: none; /* attivato in JS -> 'flex' */
+        position: fixed;
+        inset: 0;
+        z-index: 11;
+        align-items: center;
+        justify-content: center;
+        padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(20px + env(safe-area-inset-bottom, 0px));
+        box-sizing: border-box;
+        background: rgba(6, 5, 16, 0.78);
+        font-family: 'SoccerLeague', system-ui, sans-serif;
+      }
+      #infoOverlay .info-card {
+        position: relative;
+        max-width: min(92vw, 640px);
+        max-height: 100%;
+        overflow-y: auto;
+        box-sizing: border-box;
+        padding: 26px 24px 24px;
+        border-radius: 16px;
+        border: 2px solid #ffd23f;
+        background: rgba(20, 16, 46, 0.96);
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+        color: #ffffff;
+      }
+      #infoOverlay .info-title {
+        margin: 0 0 14px;
+        color: #ffd23f;
+        font-size: clamp(24px, 5vw, 34px);
+        letter-spacing: 1px;
+      }
+      #infoOverlay .info-body {
+        margin: 0;
+        font-size: clamp(14px, 3.2vw, 17px);
+        line-height: 1.5;
+        color: rgba(255, 255, 255, 0.92);
+      }
+      #infoOverlay .info-close {
+        position: absolute;
+        top: 10px;
+        right: 12px;
+        width: 36px;
+        height: 36px;
+        border: none;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #ffd23f;
+        font-family: inherit;
+        font-size: 20px;
+        line-height: 1;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      #infoOverlay .info-close:hover {
+        background: rgba(255, 210, 63, 0.2);
+      }
     </style>
   </head>
   <body>
@@ -227,6 +336,24 @@
     <div id="installHint" role="dialog" aria-label="Aggiungi alla Home">
       <span class="ih-share" aria-hidden="true"><i></i></span>
       <span class="ih-text">Gioca a <b>schermo intero</b>! Tocca <b>Condividi</b> e poi <b>"Aggiungi alla Home"</b></span>
+    </div>
+    <!-- Footer crediti (mostrato via JS nei menu, nascosto in gioco). -->
+    <div id="credits">
+      Designed by <a href="https://www.instagram.com/strangecollabo/" target="_blank" rel="noopener noreferrer">Strangecollabo</a>
+      &nbsp;·&nbsp;
+      Developed by <a href="https://www.instagram.com/twigolab/" target="_blank" rel="noopener noreferrer">Twigo Lab</a>
+    </div>
+    <!-- Link "Info"/disclaimer (in basso a destra; apre l'overlay #infoOverlay). -->
+    <div id="infoLink">
+      <a href="#" id="infoOpen">Info</a>
+    </div>
+    <!-- Overlay "Info"/disclaimer (aperto dal link #infoOpen, chiuso da ✕ / Esc / backdrop). -->
+    <div id="infoOverlay" role="dialog" aria-modal="true" aria-label="Informazioni">
+      <div class="info-card">
+        <button id="infoClose" class="info-close" aria-label="Chiudi">✕</button>
+        <h2 class="info-title">INFO</h2>
+        <p class="info-body">OG DASH è un progetto indipendente sviluppato a scopo di intrattenimento e comunicazione. Non è affiliato, sponsorizzato, approvato né in alcun modo collegato a RobTop Games o ai titolari del videogioco Geometry Dash. "Geometry Dash" e i marchi correlati appartengono ai rispettivi proprietari e sono citati esclusivamente a scopo descrittivo. I contenuti grafici, sonori e i livelli presenti in OG DASH sono originali, realizzati appositamente per questo progetto e non utilizzano asset proprietari di terzi. Il gioco si ispira al genere dei platform ritmici, le cui meccaniche non sono soggette a privativa.</p>
+      </div>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

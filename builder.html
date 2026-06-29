@@ -291,6 +291,25 @@
         right: 16px;
         z-index: 31;
       }
+      /* --- Anteprima vittoria (overlay a tutto schermo) ----------------- */
+      #victoryOverlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        background: #0c0a1f;
+      }
+      #victoryOverlay.show { display: block; }
+      #victoryCanvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+      #victoryControls {
+        position: absolute;
+        top: 14px;
+        right: 16px;
+        z-index: 31;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
     </style>
   </head>
   <body>
@@ -308,6 +327,7 @@
         <button class="btn ghost small" id="btnTrim">Taglia vuoto</button>
         <button class="btn ghost small" id="btnClear">Svuota</button>
         <button class="btn" id="btnPreview">Anteprima</button>
+        <button class="btn" id="btnVictoryPreview">Anteprima vittoria</button>
         <button class="btn green" id="btnPlay">Salva nel gioco</button>
         <button class="btn ghost" id="btnExport">Genera file</button>
       </div>
@@ -366,6 +386,17 @@
     <div id="previewOverlay">
       <canvas id="previewCanvas"></canvas>
       <button class="btn" id="previewExit">Esci (ESC)</button>
+    </div>
+
+    <!-- Anteprima vittoria: riproduce l'animazione di fine livello (VictoryAnim) -->
+    <div id="victoryOverlay">
+      <canvas id="victoryCanvas"></canvas>
+      <div id="victoryControls">
+        <button class="btn small active" id="btnVicArtie">Artie</button>
+        <button class="btn small" id="btnVicMiles">Miles</button>
+        <button class="btn" id="btnVicReplay">Ripeti</button>
+        <button class="btn" id="victoryExit">Esci (ESC)</button>
+      </div>
     </div>
 
     <script type="module" src="/src/builder/builder.js"></script>

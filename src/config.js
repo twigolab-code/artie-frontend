@@ -185,10 +185,20 @@ export const LEVELS = [
   },
 ];
 
-// --- Player selezionabili: cambia solo la skin del cubo (fisica identica) -----
+// --- Player selezionabili: skin (cubo + razzo) + look della scia (fisica identica) ---
+// `fx` definisce l'aspetto della scia per-player (vedi TRAIL_*/STAR_* sotto):
+//  trail = colore quadratini cubo + striscia razzo, glow = alone della striscia,
+//  star  = colore del particellare di coda del razzo, shape = 'star' | 'note'.
+// Hex inlinati qui (le costanti TRAIL_* sono dichiarate piu' in basso nel file).
 export const PLAYERS = [
-  { id: 'artie', name: 'Artie', skin: '/artie-cube.webp' },
-  { id: 'miles', name: 'Miles', skin: '/miles-cubo.webp' },
+  {
+    id: 'artie', name: 'Artie', skin: '/artie-cube.webp', ship: '/dodge-artie.webp',
+    fx: { trail: '#ff3b3b', glow: '#ff2a2a', star: '#ffd23f', shape: 'star' }, // rosso + stelle
+  },
+  {
+    id: 'miles', name: 'Miles', skin: '/miles-cubo.webp', ship: '/miles-razzo.png',
+    fx: { trail: '#ff8a1e', glow: '#ff6a00', star: '#ffd23f', shape: 'note' }, // arancione + note
+  },
 ];
 
 // --- Stile UI delle pagine (look Geometry Dash) ------------------------------
@@ -245,6 +255,8 @@ export const SHIP_COLOR = '#7cff4f'; // verde neon, coerente col cubo
 // Sostituiscono il disegno vettoriale di cubo/razzo quando caricate.
 // Se i file mancano, il gioco usa automaticamente il disegno vettoriale.
 export const CUBE_SKIN = '/artie-cube.webp';
+// Razzo di default (fallback): ogni player ha la propria skin del razzo in PLAYERS
+// (campo `ship`); questa è usata solo finché setShipSkin non l'ha impostata.
 export const SHIP_SKIN = '/dodge-artie.webp';
 export const USE_SKIN_GLOW = false; // bordo glow attorno alla skin (off: skin pulita)
 
@@ -337,9 +349,11 @@ export const PARTICLE_GRAVITY = 1400; // gravità sulle schegge (u/s^2)
 // Scia del cubo: campioni recenti della posizione.
 export const TRAIL_LENGTH = 14; // numero di "fantasmi" della scia
 export const TRAIL_INTERVAL = 0.016; // intervallo di campionamento (s)
-export const TRAIL_CUBE_COLOR = '#ff3b3b'; // scia rossa in modalità cubo
-export const TRAIL_RED_GLOW = '#ff2a2a'; // glow della striscia rossa del razzo
-export const TRAIL_STAR_COLOR = '#ffd23f'; // stelle gialle in modalità razzo
+export const TRAIL_CUBE_COLOR = '#ff3b3b'; // scia rossa in modalità cubo (Artie/default)
+export const TRAIL_RED_GLOW = '#ff2a2a'; // glow della striscia rossa del razzo (Artie/default)
+export const TRAIL_CUBE_COLOR_MILES = '#ff8a1e'; // scia arancione (Miles) — vedi PLAYERS.fx
+export const TRAIL_ORANGE_GLOW = '#ff6a00'; // glow arancione del razzo (Miles) — vedi PLAYERS.fx
+export const TRAIL_STAR_COLOR = '#ffd23f'; // particellare giallo del razzo (stelle o note)
 export const TRAIL_STAR_EDGE = '#7a4a00'; // bordo scuro delle stelle (definizione)
 
 // Emettitore di stelle del razzo (effetto "fumo di stelle").

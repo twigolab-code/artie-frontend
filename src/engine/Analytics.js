@@ -1,10 +1,16 @@
 // =============================================================================
-// Analytics — telemetria di gioco "fail-silent".
+// Analytics — telemetria di gioco "fail-silent", ANONIMA (pseudonimo per-sessione).
 //
-// Contratto col backend (vedi FRONTEND_INTEGRATION.md, autoritativo): il client
-// genera/persiste un `userId`, apre un `sessionId` per partita, ottiene un token
-// HMAC a breve scadenza dall'endpoint /session e POSTa UN batch ogni 30 s con gli
-// eventi accumulati. Regole d'oro:
+// PRIVACY: la telemetria NON invia dati personali. NIENTE nickname, NIENTE id
+// persistente di dispositivo. L'unico identificatore è `sessionId`, un UUID
+// EFFIMERO generato a ogni caricamento pagina (per partita) e MAI salvato in
+// localStorage → permette di correlare gli eventi di una singola partita ma non
+// di ricondurli a una persona né di tracciare un dispositivo nel tempo. Le
+// statistiche risultanti lato backend sono quindi aggregabili/anonime.
+//
+// Contratto col backend: il client apre un `sessionId` per partita, ottiene un
+// token HMAC a breve scadenza dall'endpoint /session e POSTa UN batch ogni 30 s
+// con gli eventi accumulati. Regole d'oro:
 //  - MAI bloccare il gioco: ogni metodo pubblico è no-op senza env, avvolto in
 //    try/catch, e flush() NON viene mai awaitato (gira come promise staccata).
 //  - Ordine cronologico: gli eventi sono `push`ati nell'ordine di emissione (JS
@@ -15,7 +21,7 @@
 //    completamente disattivata (nessuna rete, nessun log).
 //
 // Schema batch (esatto, NIENTE campi extra):
-//   { schemaVersion:1, batchId, sessionId, userId, nickname, clientSentAt, events:[…] }
+//   { schemaVersion:1, batchId, sessionId, clientSentAt, events:[…] }
 // Eventi: session_start | level_select | level_start | death | level_clear | session_end.
 // =============================================================================
 
@@ -26,9 +32,10 @@ const MAX_BUFFER = 1000; // tetto di sicurezza memoria se il backend è giù a l
 const TOKEN_SKEW_S = 60; // refresh del token entro 60 s dalla scadenza
 const BACKOFF_MS = [1000, 2000, 4000]; // ritardi base per i retry su 429/5xx (+jitter)
 
-// UUID v4: primario `crypto.randomUUID()` (richiede secure context: HTTPS in prod,
-// localhost in dev → sempre ok). Fallback RFC-4122 via getRandomValues per Safari iOS
-// molto vecchi / contesti non sicuri.
+// UUID v4 (solo per `sessionId`/`batchId` effimeri — NON persistiti): primario
+// `crypto.randomUUID()` (richiede secure context: HTTPS in prod, localhost in dev →
+// sempre ok). Fallback RFC-4122 via getRandomValues per Safari iOS molto vecchi /
+// contesti non sicuri.
 function uuid() {
   try {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -40,22 +47,6 @@ function uuid() {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-// userId persistente per dispositivo (chiave 'artie_uid'). Mirroring dello stile
-// getNickname/saveNickname (try/catch). Se localStorage non è disponibile (modalità
-// privata) ripiega su un id effimero valido per la sessione.
-function getOrCreateUid() {
-  try {
-    let id = localStorage.getItem('artie_uid');
-    if (!id) {
-      id = uuid();
-      localStorage.setItem('artie_uid', id);
-    }
-    return id;
-  } catch {
-    return uuid();
-  }
-}
-
 export class Analytics {
   constructor() {
     // Lettura env (Vite inietta i VITE_* a build time). Senza entrambe → disattivata.
@@ -65,10 +56,9 @@ export class Analytics {
     this.sessionUrl = sessionUrl;
     this.ingestUrl = ingestUrl;
 
-    // Identità (innocua anche se disabilitata: nessuna rete).
-    this.userId = getOrCreateUid();
+    // Identità pseudonima: SOLO un id di sessione effimero, mai persistito e non
+    // riconducibile a una persona o a un dispositivo. Niente userId, niente nickname.
     this.sessionId = uuid(); // fresco a ogni caricamento pagina = per partita
-    this.nickname = '';
 
     // Stato runtime.
     this.buffer = []; // eventi accumulati, cronologici
@@ -84,13 +74,13 @@ export class Analytics {
   }
 
   // --- Ciclo di vita sessione -------------------------------------------------
-  // Avvio sessione: chiamato quando il giocatore entra (nickname + GIOCA). Emette
+  // Avvio sessione: chiamato quando il giocatore entra (click su GIOCA). Emette
   // session_start, avvia il timer di flush e lancia (fire-and-forget) l'handshake.
-  start(nickname) {
+  // NON riceve né invia il nickname: la telemetria è anonima.
+  start() {
     if (!this.enabled || this.started) return;
     try {
       this.started = true;
-      this.nickname = nickname || '';
       this._push({ type: 'session_start' });
       this._getToken(); // non awaitato: di solito pronto prima del primo flush
       this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL_MS);
@@ -180,8 +170,6 @@ export class Analytics {
       schemaVersion: SCHEMA_VERSION,
       batchId: uuid(),
       sessionId: this.sessionId,
-      userId: this.userId,
-      nickname: this.nickname,
       clientSentAt: Date.now(),
       events,
     };
@@ -199,7 +187,7 @@ export class Analytics {
         const res = await fetch(this.sessionUrl, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ userId: this.userId, sessionId: this.sessionId }),
+          body: JSON.stringify({ sessionId: this.sessionId }),
         });
         if (res.ok) {
           const data = await res.json();

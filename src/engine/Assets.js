@@ -29,8 +29,11 @@ export function getSkin(path) {
   return _cache.get(path);
 }
 
-// Pre-carica le skin dei player e il razzo.
-for (const p of PLAYERS) getSkin(p.skin);
+// Pre-carica le skin (cubo + razzo) di ogni player e il razzo di default.
+for (const p of PLAYERS) {
+  getSkin(p.skin);
+  if (p.ship) getSkin(p.ship);
+}
 export const SHIP_IMG = getSkin(SHIP_SKIN);
 
 // Skin di default del cubo (primo player). Il player può cambiarla con setSkin.
