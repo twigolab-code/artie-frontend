@@ -96,9 +96,11 @@ export const ROCKET_SPEED_LINE_COLOR = '#b8a6ff'; // linee di velocità (warp)
 // `bg`/`floor` = stile sfondo/pavimento; `cube`/`ship` = temi colore (vira ai
 // portali); `scrollSpeed` = pace (uguale 630 per tutti); `mapKey` = quale mappa in
 // data/; `diff`/`diffFrac` = etichetta + riempimento [0,1] della barra difficoltà.
-// 5 livelli giocabili con mappe DISTINTE e a difficoltà CRESCENTE (geometria, non
-// velocità): 1 City (Facile) · 2 Car Wash · 3 Los Angeles · 4 Boulevard ·
-// 5 Metro (Difficile). Ogni mappa ha una meccanica firma (vedi i file in data/).
+// PROVVISORIO: tutti i livelli condividono la griglia `testedo` (mapKey: 'testedo')
+// come segnaposto, finché non si creano i percorsi veri di ognuno col Builder. Ogni
+// livello mantiene comunque i SUOI colori (bg/floor/obstacleBottom/cube/ship), così
+// gli elementi (blocchi/spuntoni) restano coerenti con lo sfondo anche se il percorso
+// è lo stesso. `obstacleBottom` è applicato in render (NON è dentro la griglia).
 export const LEVELS = [
   {
     // Livello creato col Game Builder e importato come built-in (visibile a tutti).
@@ -126,7 +128,7 @@ export const LEVELS = [
     ship: LA_SHIP,
     obstacleBottom: '#8a1410', // bottom gradiente ostacoli coerente col floor rosso
     scrollSpeed: 630,
-    mapKey: 'skyline',
+    mapKey: 'testedo', // PROVVISORIO: griglia segnaposto (colori City restano)
     diffFrac: 0.30,
   },
   {
@@ -139,7 +141,7 @@ export const LEVELS = [
     ship: LA_SHIP,
     obstacleBottom: '#9a1414', // rosso neon scuro, coerente col bordo neon dell'asfalto
     scrollSpeed: 630,
-    mapKey: 'carwash',
+    mapKey: 'testedo', // PROVVISORIO: griglia segnaposto (colori Car Wash restano)
     diffFrac: 0.45,
   },
   {
@@ -152,7 +154,7 @@ export const LEVELS = [
     ship: LA_SHIP,
     obstacleBottom: '#8a3a12', // ambra/arancio scuro, coerente col tramonto LA
     scrollSpeed: 630,
-    mapKey: 'skyline2',
+    mapKey: 'testedo', // PROVVISORIO: griglia segnaposto (colori Los Angeles restano)
     diffFrac: 0.60,
   },
   {
@@ -165,7 +167,7 @@ export const LEVELS = [
     ship: LA_SHIP,
     obstacleBottom: '#143a6a', // blu scuro, coerente col floor azzurro
     scrollSpeed: 630,
-    mapKey: 'boulevard',
+    mapKey: 'testedo', // PROVVISORIO: griglia segnaposto (colori Boulevard restano)
     diffFrac: 0.78,
   },
   {
@@ -178,7 +180,7 @@ export const LEVELS = [
     ship: LA_SHIP,
     obstacleBottom: '#241a52', // indaco/viola scuro, coerente con la banchina viola
     scrollSpeed: 630,
-    mapKey: 'metro2',
+    mapKey: 'testedo', // PROVVISORIO: griglia segnaposto (colori Metro restano)
     diffFrac: 0.95,
   },
 ];
@@ -217,15 +219,16 @@ export const PLAYER_FILL_BOTTOM = '#3fb81f'; // gradiente cubo: verde scuro in b
 export const SCROLL_SPEED = 468; // default Camera (sovrascritto per livello)
 
 // --- Fisica del player ------------------------------------------------------
-// Valori in unità logiche e secondi. Pensati per dare il classico "arco" di
-// salto di Geometry Dash: salita rapida, gravità decisa, atterraggio netto.
-// Velocità globale +30% proporzionale: scroll/velocità ×1.30, gravità ×1.30²
-// (=1.69). Così la durata d'aria si accorcia ma l'ARCO di salto resta identico
-// rispetto agli ostacoli — il level design non cambia, va solo più veloce.
+// Salto in stile Geometry Dash: BASSO e CORTO/SCATTANTE. Misure reali
+// (integratore discreto @60Hz, scroll 630): apice ~2.0 tile, durata d'aria
+// ~0.40s, gittata ~4.2 tile. Più corto del vecchio arco (apice ~2.8, gittata
+// ~5.6) così la rotazione del cubo (180° per salto) sembra più rapida. NB: i
+// livelli inclusi erano tarati sull'arco vecchio — alcuni NON passano più il
+// validatore di giocabilità (scelta voluta; vedi §7 CLAUDE.md).
 export const PLAYER_SIZE = 60; // lato del cubo (quadrato)
-export const GRAVITY = 4732; // 2800 × 1.69 (gravità scala col quadrato di k)
-export const JUMP_VELOCITY = -1300; // -1000 × 1.30
-export const MAX_FALL_SPEED = 2080; // 1600 × 1.30
+export const GRAVITY = 6000; // gravità decisa: arco basso e secco (vecchio 4732)
+export const JUMP_VELOCITY = -1250; // salto più basso (apice ~2.0 tile) (vecchio -1300)
+export const MAX_FALL_SPEED = 2400; // discesa più nitida con G alta (non cambia l'apice)
 
 // --- Fisica del razzo (modalità ship) ---------------------------------------
 // Volo tipo jetpack: gravità ridotta, spinta su tenendo premuto, velocità
@@ -259,10 +262,12 @@ export const FLOOR_Y = LOGICAL_HEIGHT - FLOOR_HEIGHT;
 // X fissa del player sullo schermo (in GD il cubo resta fermo e il mondo scorre).
 export const PLAYER_X = 220;
 
-// Rotazione: il cubo compie un giro completo (360°) per salto e atterra dritto.
-// Velocità angolare calibrata sulla durata d'aria (~0.714s) così il giro si
-// chiude proprio all'atterraggio: 2π / 0.714 ≈ 8.8 rad/s.
-export const ROTATION_SPEED = Math.PI * 2.8 * 1.3; // ×k: chiude il giro nella durata d'aria ridotta
+// Rotazione stile GD (gestita in Player): il cubo ruota di 180° per SALTO e di
+// 90° quando "cade da un gradino"; all'atterraggio fa snap al 90° più vicino
+// (riposa a 0/90/180/270°). Velocità tarata perché il mezzo giro (180°) si chiuda
+// nella durata d'aria del salto CORTO (~0.40s): π / 0.40 ≈ 7.85 rad/s. _updateRotation
+// si ferma al target (non gira a vuoto), quindi una caduta da gradino chiude 90°.
+export const ROTATION_SPEED = Math.PI * 2.5; // ≈7.85 rad/s: 180° entro la durata d'aria (più rapida)
 
 // Pavimento: fascia scura, linea superiore bianca brillante, griglia quadrettata.
 export const FLOOR_COLOR = '#0a0618'; // fascia di terreno quasi nera
@@ -308,7 +313,7 @@ export const ORB_RADIUS = 26; // raggio dell'anello
 
 // Jump pad: balzo automatico e potente al contatto (più forte del salto).
 export const PAD_COLOR = '#ffd23f'; // giallo
-export const PAD_VELOCITY = -1950; // -1500 × 1.30 (velocità), > |JUMP_VELOCITY|
+export const PAD_VELOCITY = -2200; // apice pad ~6.4 tile (compensa la G più alta), > |JUMP_VELOCITY|
 
 // Monete collezionabili: ruotano su sé stesse (spin 360°). PNG con fallback
 // vettoriale (cerchio dorato + stella). Raccolta su contatto, max 5 per livello.

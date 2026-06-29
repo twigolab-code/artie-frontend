@@ -60,8 +60,9 @@ export class Player {
     this.alive = true;
 
     this.mode = 'cube';
-    this.angle = 0; // rotazione cubo
-    this._targetAngle = 0;
+    this.angle = 0; // rotazione cubo (verso _targetAngle)
+    this._targetAngle = 0; // GD: +180° per salto, +90° quando cade da un gradino
+    this._jumpedThisFrame = false; // distingue "salto" da "caduta da gradino"
     this.pitch = 0; // inclinazione razzo
   }
 
@@ -86,6 +87,9 @@ export class Player {
 
   // --- Modalità CUBO ---------------------------------------------------------
   _updateCube(dt, input, level) {
+    this._jumpedThisFrame = false; // verrà messo a true da jump() se si salta ora
+    const wasGrounded = this.onGround; // per rilevare la "caduta da un gradino"
+
     // Salto da terra: basta tenere premuto (rimbalza appena tocca).
     if (input.held && this.onGround) this.jump();
 
@@ -101,6 +105,12 @@ export class Player {
       this.y = floorTop;
       if (this.vy > 0) this.vy = 0;
       this._setGrounded();
+    }
+
+    // GD: se il cubo lascia il suolo SENZA saltare (è uscito dal bordo di un
+    // gradino), ruota di 90°. Il salto (gestito in jump()) invece ruota di 180°.
+    if (wasGrounded && !this.onGround && !this._jumpedThisFrame) {
+      this._targetAngle += Math.PI / 2;
     }
 
     this._updateRotation(dt);
@@ -217,8 +227,9 @@ export class Player {
     this.vy = JUMP_VELOCITY;
     this.onGround = false;
     this.jumpCount++; // contatore monotòno (letto da main.js per stats + SFX)
-    // Un giro completo (360°) per salto: il cubo atterra sempre faccia in su.
-    if (this.mode === 'cube') this._targetAngle += Math.PI * 2;
+    this._jumpedThisFrame = true; // così la caduta-da-gradino non si attiva anche
+    // GD: ogni salto fa mezzo giro (180°). Gli orb chiamano jump() -> 180° pure.
+    if (this.mode === 'cube') this._targetAngle += Math.PI;
   }
 
   kill() {
@@ -226,17 +237,20 @@ export class Player {
   }
 
   _updateRotation(dt) {
-    if (this.onGround) return;
-    const step = ROTATION_SPEED * dt;
+    if (this.onGround) return; // GD: rotazione bloccata da terra (cubo dritto)
+    // Ruota verso _targetAngle a velocità costante, fermandosi al target (NON gira
+    // a vuoto). Così un salto chiude 180°, una caduta da gradino 90°. dt è fisso
+    // (1/60) -> indipendente dal framerate. _land() aggancia poi al 90° più vicino.
     if (this.angle < this._targetAngle) {
-      this.angle = Math.min(this.angle + step, this._targetAngle);
+      this.angle = Math.min(this.angle + ROTATION_SPEED * dt, this._targetAngle);
     }
   }
 
   _land() {
-    // Aggancia a un giro intero: la faccia torna sempre dritta (verso l'alto).
-    const turn = Math.PI * 2;
-    this.angle = Math.round(this.angle / turn) * turn;
+    // Snap al multiplo di 90° più vicino (stile GD): il cubo riposa a 0/90/180/270°.
+    // _targetAngle riparte da qui così il prossimo salto/caduta aggiunge il suo step.
+    const quarter = Math.PI / 2;
+    this.angle = Math.round(this.angle / quarter) * quarter;
     this._targetAngle = this.angle;
   }
 

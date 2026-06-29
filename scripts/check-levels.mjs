@@ -17,11 +17,6 @@ const DATA = resolve(__dir, '../src/data');
 
 const MAPS = [
   ['testedo.js', 'testedo', 'TESTEDO'],
-  ['skyline.js', 'skyline', 'City'],
-  ['carwash.js', 'carwash', 'Car Wash'],
-  ['skyline2.js', 'skyline2', 'Los Angeles'],
-  ['boulevard.js', 'boulevard', 'Boulevard'],
-  ['metro2.js', 'metro2', 'Metro'],
 ];
 
 let failed = false;

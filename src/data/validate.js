@@ -22,9 +22,10 @@
 // Le costanti rispecchiano src/config.js @ scrollSpeed 630.
 // =============================================================================
 
-// --- Costanti fisica (da config.js) ----------------------------------------
+// --- Costanti fisica (MIRROR ESATTO di config.js — tenere allineate!) -------
+// Salto basso/corto: apice ~2.0 tile, gittata ~4.2, durata d'aria ~0.40s @630.
 const TILE = 60, FLOOR_Y = 600, PLAYER_X = 220, SIZE = 60;
-const GRAVITY = 4732, JUMP_V = -1300, MAXFALL = 2080, PAD_V = -1950, ORB_R = 26;
+const GRAVITY = 6000, JUMP_V = -1250, MAXFALL = 2400, PAD_V = -2200, ORB_R = 26;
 const SCROLL = 630, DT = 1 / 60;
 
 export function invariants(grid) {

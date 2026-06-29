@@ -172,6 +172,7 @@ export class PlaytestPreview {
     if (touching && touching !== this.lastPad) {
       this.player.vy = PAD_VELOCITY;
       this.player.onGround = false;
+      this.player._targetAngle += Math.PI; // come un salto: 180° (coerente col gioco)
       this.lastPad = touching;
     } else if (!touching) {
       this.lastPad = null;

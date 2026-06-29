@@ -22,11 +22,6 @@ import { Background } from './effects/Background.js';
 import { CityBackground } from './effects/CityBackground.js';
 import { ImageBackground } from './effects/ImageBackground.js';
 import { LaBackground } from './effects/LaBackground.js';
-import { skyline } from './data/skyline.js';
-import { skyline2 } from './data/skyline2.js';
-import { metro2 } from './data/metro2.js';
-import { carwash } from './data/carwash.js';
-import { boulevard } from './data/boulevard.js';
 import { testedo } from './data/testedo.js';
 import { getCustomLevels } from './data/customLevels.js';
 import { getSkin, LOGO_IMG, BG2_IMG, COIN_IMG, OPTIONS_IMG, STATS_IMG, getLevelBg, fontState } from './engine/Assets.js';
@@ -129,10 +124,10 @@ function unscalePoint(p) {
   return { x: cx + (p.x - cx) / s, y: cy + (p.y - cy) / s };
 }
 
-// Mappe disponibili, indicizzate per mapKey del livello.
-// skyline = City · skyline2 = Los Angeles · metro2/carwash/boulevard = nuovi
-// (per ora duplicati di skyline, da differenziare).
-const MAPS = { testedo, skyline, skyline2, metro2, carwash, boulevard };
+// Mappe disponibili, indicizzate per mapKey del livello. PROVVISORIO: c'è solo
+// `testedo` (tutti i livelli la condividono come segnaposto, vedi LEVELS in config).
+// I livelli custom aggiungono a runtime le loro chiavi 'custom-*' (loadCustomLevels).
+const MAPS = { testedo };
 
 // --- Tema colore dello sfondo (transizione morbida tra le sezioni) ----------
 // Lerp RGB di due colori hex -> stringa 'rgb(...)'.
@@ -805,7 +800,7 @@ function handlePads() {
   if (touching && touching !== lastPad) {
     player.vy = PAD_VELOCITY; // spinta diretta (più forte del salto)
     player.onGround = false;
-    player._targetAngle += Math.PI * 2; // giro completo (faccia in su)
+    player._targetAngle += Math.PI; // come un salto: mezzo giro (180°), snap a 90° all'atterraggio
     runJumps++; // il pad conta come salto
     lastPad = touching;
   } else if (!touching) {

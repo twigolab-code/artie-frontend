@@ -82,11 +82,7 @@ src/
     ImageBackground.js Image-tiled background (sky-only, horizontal loop, slow parallax; scales any image to sky height so differently-sized sources sync visually). One instance per image bg, built lazily in `getBg()` via `getLevelBg()`
   data/
     _grid.js           Helpers: ROWS=12, gap(w), assemble(...segments)
-    skyline.js         City (mapKey 'skyline')
-    skyline2.js        Los Angeles (mapKey 'skyline2') — copy of skyline
-    metro2.js          Metro (mapKey 'metro2') — copy of skyline (to be modified)
-    carwash.js         Car Wash (mapKey 'carwash') — copy of skyline (to be modified)
-    boulevard.js       Boulevard (mapKey 'boulevard') — copy of skyline (to be modified)
+    testedo.js         The ONLY shipped map (flat array of 12 strings, builder-made). PROVVISORIO: all 6 LEVELS share it via mapKey 'testedo' (each keeps its own colors). The 5 old hand-coded maps (skyline/skyline2/metro2/carwash/boulevard) were REMOVED — future paths are authored in the Builder
     validate.js        SHARED level validator (pure fns over a grid): invariants() + playable() (cube-physics BFS). Imported by BOTH scripts/check-levels.mjs (Node) and src/builder/builder.js (browser) → single source of truth. Mirrors config.js @630
     customLevels.js    SHARED custom-level store (localStorage 'gd_customLevels'): THEME_PRESETS, DIFFS, get/save(upsert by id)/delete + buildCustomEntry() + uniqueCustomId(). Imported by the builder (create/edit/delete) and main.js loadCustomLevels() (reads) — see §13
   builder/
@@ -236,14 +232,21 @@ builder.html           Standalone editor page (NOT part of the game); Vite multi
   + a `sendBeacon` flush. `level` is `levelIndex + 1` (backend wants ≥1). None of this is awaited.
 
 ## 5. Physics constants (from `config.js` — quote, don't guess)
-Velocities are scaled ×1.30 and gravity ×1.69 vs. an earlier "slow" baseline (the +30% speed feel).
-- **Cube:** `GRAVITY = 4732`, `JUMP_VELOCITY = -1300`, `MAX_FALL_SPEED = 2080`,
-  `ROTATION_SPEED = Math.PI * 2.8 * 1.3` (one full spin per jump arc), `PLAYER_SIZE = 60`.
+The jump is a **low/short GD-style arc** (real discrete-sim @ scroll 630: apex ~2.0 tiles, air-time
+~0.40s, range ~4.2 tiles). It was shortened from the old floaty arc (apex ~2.8, range ~5.6) so the
+rotation reads snappier. **The bundled levels were authored for the OLD longer jump — some no longer pass
+`scripts/check-levels.mjs` (kept intentionally; not re-tuned).** See §7.
+- **Cube:** `GRAVITY = 6000`, `JUMP_VELOCITY = -1250`, `MAX_FALL_SPEED = 2400`,
+  `ROTATION_SPEED = Math.PI * 2.5` (real-GD rotation: **+180° per jump, +90° when the cube falls off a
+  ledge** — `Player._updateCube` detects leaving the ground without jumping; `_updateRotation` rotates
+  `angle` toward `_targetAngle` and **stops at the target** (no free-spin); `_land()` snaps to the
+  nearest 90° so the cube rests at 0/90/180/270°; orbs call `jump()` → 180°, pads add `+= Math.PI` too),
+  `PLAYER_SIZE = 60`.
 - **Ship (jetpack):** `SHIP_GRAVITY = GRAVITY * 0.42`, `SHIP_THRUST = GRAVITY * 0.95`,
   `SHIP_MAX_RISE = -832`, `SHIP_MAX_FALL = 988`, `SHIP_MAX_TILT = 0.5`, `SHIP_TILT_LERP = 0.18`.
   **Top of screen (y ≤ 0) is instant death**; the floor is a safe landing.
-- **Items:** `PAD_VELOCITY = -1950` (stronger than a jump, cube only), `ORB_RADIUS = 26`,
-  `COINS_PER_LEVEL = 5`.
+- **Items:** `PAD_VELOCITY = -2200` (stronger than a jump, cube only; bumped from -1950 so pad apex
+  stays ~6.4 tiles under the higher gravity), `ORB_RADIUS = 26`, `COINS_PER_LEVEL = 5`.
 - **Layout:** `TILE = 60`, `GRID_SIZE = 60`, `FLOOR_HEIGHT = TILE*2 = 120`, `FLOOR_Y = 600`,
   `PLAYER_X = 220`, `LOGICAL_WIDTH = 1280`, `LOGICAL_HEIGHT = 720`.
 - **Per-level scroll speed** lives on each `LEVELS` entry (`scrollSpeed`), overriding the default
@@ -297,30 +300,33 @@ Velocities are scaled ×1.30 and gravity ×1.69 vs. an earlier "slow" baseline (
 | `9` | coin — collectible, **max 5 per level**, always optional |
 
 ## 7. Level design rules (geometry engine-verified @ scrollSpeed 630)
-The numbers below are derived directly from `config.js` physics at the current **`scrollSpeed: 630`**
-(all 5 levels). Verify any map edit with `node scripts/check-levels.mjs` (invariant checks + a
+The numbers below are derived from `config.js` physics at **`scrollSpeed: 630`** for the **low/short**
+jump arc (see §5). Verify any map edit with `node scripts/check-levels.mjs` (invariant checks + a
 cube-physics **playability simulator** that proves a survivable path exists — see end of §9).
-- Cube jump apex **~2.98 tiles**, horizontal range **~5.77 tiles**.
-- **Landing on a higher platform: max `+2` tiles** (near edge ~1–3 tiles ahead). **`+3` is NOT
-  reachable by a plain jump** — needs an **orb in the ascent** or a **pad**.
-- Orb (`5`) = a fresh full jump from the touch point (another ~2.98 apex); **orbs chain** (re-arm on
-  exit) so you can climb high with 2–3 orbs. Place each on the rising arc (~row 7, then ~row 5/4).
-- Pad (`8`) apex **~6.7 tiles** (cube-only) — for tall towers/platforms (≤ `+6`, i.e. row 3).
-- **Max 4 contiguous ground hazards** (`2`/`6`/`s`) per single jump (range 5.77 clears 4); separate
-  groups with **flat ground** (≥ a couple of tiles) — NOT with a ground-level block (its side is lethal).
-- Every horizontal gap the cube must clear **≤ 5 tiles**; the landing is always a `1`-top or ground —
+**Note:** the 6 bundled levels were authored for the OLD longer jump (apex ~2.98 / range ~5.77); after
+shortening the jump some now FAIL the playability checker and have NOT been re-tuned (intentional). New
+maps should follow the limits below.
+- Cube jump apex **~2.0 tiles**, horizontal range **~4.2 tiles** (low/short, GD-like).
+- **Landing on a higher platform: max `+1` tile** in a plain jump. **`+2`/`+3` are NOT reachable by a
+  plain jump** — build a **staircase of `+1` steps**, or use an **orb in the ascent** or a **pad**.
+- Orb (`5`) = a fresh jump from the touch point (another ~2.0 apex); **orbs chain** (re-arm on exit) so
+  you can climb with 2–3 orbs. Place each on the rising arc.
+- Pad (`8`) apex **~6.4 tiles** (cube-only) — for tall towers/platforms (≤ `+6`, i.e. row 3).
+- **Max 3 contiguous ground hazards** (`2`/`6`/`s`) per single jump (range ~4.2 clears 3, NOT 4);
+  separate groups with **flat ground** — NOT with a ground-level block (its side is lethal).
+- Every horizontal gap the cube must clear **≤ 4 tiles**; the landing is always a `1`-top or ground —
   **never a hazard, never a block's side**.
 - **Blocks (`1`) are full solid cells at ANY row** — top = land, **sides & underside = death**. So:
   - **Towers/staircases**: build as solid pillars climbed step-by-step (`+1`→`+2`, then `+1` onto a
     `+3`). The player must reach the **top via the staircase**; never leave a ground-running cube
-    aimed at a lethal side. Keep ≥ ~5 flat tiles between a hazard run and a tower face so the cube can
+    aimed at a lethal side. Keep ≥ ~4 flat tiles between a hazard run and a tower face so the cube can
     land and re-jump (a tight spike-then-wall combo is a forced death — the simulator catches it).
   - **Floating hop cubes**: a single `1` at row 7 (`+2`) with **empty cells below** lets a ground cube
     run *under* it safely and jump *onto* it for verticality (no ground-level side to crash into).
   - **Tunnels/corridors**: a block ceiling at rows ~1–4 with open **headroom** below (rows ~5–9) — the
     cube runs underneath; jumping into the ceiling underside = death, so any required jump in a tunnel
-    must stay clear of the ceiling (a plain jump rises ~3 tiles).
-- Climb **≤ 2 tiles** per single jump (≤ 3 only with an orb in the ascent; taller via pad).
+    must stay clear of the ceiling (a plain jump rises ~2 tiles).
+- Climb **≤ 1 tile** per single jump (`+2`/`+3` only via a staircase, an orb in the ascent, or a pad).
 - Ship sections open with `3`, close with `4`; keep a continuous open corridor — floor (`2`) and
   ceiling (`7`) spikes **must never share a column**, rows **0–1 stay clear** (top of screen y≤0 =
   instant death), and any in-corridor blocks must leave **≥ ~4 rows** of open vertical passage. No pad
@@ -340,10 +346,10 @@ cube-physics **playability simulator** that proves a survivable path exists — 
    const map = assemble(start, segA, gap(5), /* ... */);
    export const <name> = map;
    ```
-2. **`src/main.js`** — add the import near the other level imports and register it in `MAPS`:
+2. **`src/main.js`** — add the import near `testedo` and register it in `MAPS`:
    ```js
    import { <name> } from './data/<name>.js';
-   const MAPS = { level2, la, metro, skyline, <name> };
+   const MAPS = { testedo, <name> };
    ```
 3. **`src/config.js`** — add an entry to the `LEVELS` array:
    ```js
@@ -359,44 +365,36 @@ cube-physics **playability simulator** that proves a survivable path exists — 
    `mapKey` must match both the `data/` export and the `MAPS` key.
 
 ## 9. Current content
-All 6 levels are playable, **`scrollSpeed: 630` (same for all — difficulty rises via geometry, NOT
-speed)**, themes `LA_CUBE/LA_SHIP`. Each level sets a per-level `obstacleBottom` (bottom color of the
-spike/block gradient, coherent with its bg; top stays near-black `OBSTACLE_FILL_TOP`). The 5 original
-levels are in difficulty order City · Car Wash · Los Angeles · Boulevard · Metro, but **`TESTEDO`** (a
-Game-Builder level imported as a built-in, Car Wash look, hard) now leads the carousel — so the carousel
-order is **no longer strictly difficulty-ascending**.
+**PROVVISORIO — all 6 levels share ONE grid (`testedo`).** Every `LEVELS` entry has `mapKey: 'testedo'`,
+so City/Car Wash/Los Angeles/Boulevard/Metro all play the same builder-made path as TESTEDO for now. The
+5 old hand-coded maps were removed; real per-level paths will be authored in the Builder later. **Each
+level still keeps its OWN look:** distinct `bg`/`floor`/`cube`/`ship`/`obstacleBottom`, so the shared path
+renders in each level's colors (City red, Boulevard blue, Metro indigo, …). `obstacleBottom` is applied
+**at render** (`fillBottom = lvl().obstacleBottom` → `level.render` → `obstacle.render`), NOT baked into
+the grid — that's why one grid shows different element colors per level. Per-level **stats/coins are
+independent** (keyed by level `id`, not `mapKey`). `scrollSpeed: 630` for all; exactly 5 coins.
 
-**Map design — DISTINCT maps with a difficulty RAMP and real GD-style verticality.** Each map has its
-own signature mechanic (towers, aerial chains, tunnels, orb chains, pad launches) and a different
-segment order — no two are the same, and they are **no longer copies of `skyline`**. The ship section
-is **early in the easy levels and later/longer in the hard ones** (L1–L2 ship ~tile 32; L3 mid; L4 late;
-L5 a long finale). Difficulty knobs (all per-level data, speed unchanged): obstacle density, climb
-height, tunnel length, number of orb/pad chains, contiguous-hazard count (1 → 4), and `diff`/`diffFrac`
-in `config.js` (Facile 0.30 → Difficile 0.95). Exactly **5 optional coins** per level.
+**Validate any map** with `node scripts/check-levels.mjs` (no test harness in the repo). It runs, for
+each shipped map (currently just `testedo`): (1) **invariant checks** — every row same width; exactly 5
+`9`; no column with both `7` and `2`; rows 0–1 free of spikes/items; rows 10–11 empty; first `4` after
+first `3`; ≤4 contiguous ground hazards; no spike on a block top — AND (2) a **cube-physics playability
+simulator** (BFS proving a survivable path exists end-to-end; mirrors the @630 constants from
+`config.js`). The two validator functions (`invariants` + `playable`) live in `src/data/validate.js`
+(shared by the Node checker **and** the in-browser Game Builder — see §13); `check-levels.mjs` imports
+them. (`_grid.js`'s `gap`/`assemble` are kept for the array format / future segment authoring; testedo
+is a flat array.)
 
-**Always validate a map edit** with `node scripts/check-levels.mjs` (no test harness in the repo). It
-runs, for every map: (1) **invariant checks** — every segment row same width; exactly 5 `9`; no column
-with both `7` and `2`; rows 0–1 free of spikes/items; rows 10–11 empty; first `4` after first `3`; ≤4
-contiguous ground hazards; no spike on a block top — AND (2) a **cube-physics playability simulator**
-(BFS over jump timings through the cube sections, auto-passing ship zones and auto-using pads/orbs)
-that PROVES a survivable path exists end-to-end. The simulator is what catches forced-death traps the
-eye misses (e.g. a hazard run too close to a tower face — keep ≥ ~5 flat tiles between them). It mirrors
-the @630 constants from `config.js`; keep it in sync if physics change. Then `npm run dev` to feel-check.
-The two validator functions (`invariants` + `playable`) now live in `src/data/validate.js` (shared by
-the Node checker **and** the in-browser Game Builder — see §13); `check-levels.mjs` just imports them.
-
-| # | id | name | mapKey | bg | floor | diff | signature mechanic |
+| # | id | name | mapKey | bg | floor | diff | note |
 |---|----|------|--------|----|----|----|-------|
-| 0 | testedo | TESTEDO | `testedo` | `carwash` (wash.webp) | `carwash` | Difficile | **Game-Builder import** (committed built-in); long 578-col map, ship section + orb/pad, ≤4 hazard. First in carousel |
-| 1 | city | City | `skyline` | `city` | `city` | Facile | gentle: air-stairs + 1 orb + single-cube hops, ship early, ≤1 hazard |
-| 2 | carwash | Car Wash | `carwash` | `carwash` (wash.webp) | `carwash` | Medio | tower hopping (staircase towers) + orb→`+3` + 3-cube chain, ship early |
-| 3 | losangeles | Los Angeles | `skyline2` | `losangeles` (LA.webp) | `la` | Medio | aerial chain + **first tunnel** + **pad**→`+4`, ship at mid, ≤3 |
-| 4 | boulevard | Boulevard | `boulevard` | `boulevard` (boulevard.webp) | `boulevard` | Difficile | **2-orb chain** + tall `+3` towers + longer tunnel, ship late, ≤4 once |
-| 5 | metro | Metro | `metro2` | `metro` (metro.webp) | `metro` | Difficile | everything: **3-orb chain**, pad→`+6`, dense `2262` runs, long tunnel, **ship finale** |
+| 0 | testedo | TESTEDO | `testedo` | `carwash` | `carwash` | Difficile | the one real builder-made path; leads the carousel |
+| 1 | city | City | `testedo` | `city` | `city` | Facile | testedo grid, City colors (red) |
+| 2 | carwash | Car Wash | `testedo` | `carwash` | `carwash` | Medio | testedo grid, Car Wash colors |
+| 3 | losangeles | Los Angeles | `testedo` | `losangeles` | `la` | Medio | testedo grid, LA colors |
+| 4 | boulevard | Boulevard | `testedo` | `boulevard` | `boulevard` | Difficile | testedo grid, Boulevard colors (blue) |
+| 5 | metro | Metro | `testedo` | `metro` | `metro` | Difficile | testedo grid, Metro colors (indigo) |
 
-(Carousel/`LEVELS` order in `config.js` is **TESTEDO → City → Car Wash → Los Angeles → Boulevard →
-Metro**. The 5 originals keep their City→…→Metro difficulty ramp; TESTEDO is a hard Game-Builder import
-placed first, so the carousel is no longer strictly difficulty-ascending.)
+(Carousel order = `LEVELS` order: TESTEDO → City → Car Wash → Los Angeles → Boulevard → Metro. All share
+the testedo grid until real paths are built; only the visuals differ.)
 
 - **Players (skins only, identical physics):** `Artie` (`/artie-cube.png`), `Miles` (`/miles-cubo.png`).
 - **Themes:** neon (`THEME_CUBE/SHIP`), city (`CITY_CUBE/SHIP`), LA (`LA_CUBE/SHIP`), metro (`METRO_CUBE/SHIP`).
@@ -507,8 +505,13 @@ game runtime.
   to the clipboard, and downloads `<name>.js`. Then wire it per §8 (drop in `src/data/`, add to `MAPS`
   in `main.js`, add a `LEVELS` entry in `config.js`). The builder emits the **assembled array**
   directly (no `assemble()`/named segments) — equivalent to what `Level` consumes.
-- **Import / edit existing:** "Carica livello…" loads any current map (`skyline/skyline2/metro2/
-  carwash/boulevard`) or a pasted array to seed the grid — start from the current paths to improve them.
+- **Import / edit existing ("Carica livello…"):** two labeled sections. **"Livelli del gioco"** = every
+  `LEVELS` entry (imported from `config.js`) by real name (TESTEDO, City, Car Wash, …); clicking loads its
+  grid via the builder's `MAPS` mirror (all `testedo` for now) to **remix as new** (`editing=null`).
+  **"Livelli custom salvati"** = `getCustomLevels()` (localStorage), hidden if none; clicking enters
+  **edit mode** (`loadCustomForEdit`, overwrite on save). Plus the paste-array textarea ("Carica da
+  testo"). When real per-level paths exist, only the builder's `MAPS` mirror + config mapKeys change —
+  `openImport` is data-driven and needs no edit.
 - **Anteprima (playable playtest):** "Anteprima" opens a full-screen overlay (`#previewOverlay`) that
   **actually plays the current grid** using the real engine via `src/builder/playtest.js`
   (`PlaytestPreview`). It **imports and reuses** `GameLoop`/`Renderer`/`Player`/`Level`/`Camera`/

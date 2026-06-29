@@ -24,14 +24,13 @@ import {
 } from '../data/customLevels.js';
 import { PlaytestPreview } from './playtest.js';
 
-// Mappe attuali per "Carica livello…" (modifica i percorsi esistenti).
-import { skyline } from '../data/skyline.js';
-import { skyline2 } from '../data/skyline2.js';
-import { metro2 } from '../data/metro2.js';
-import { carwash } from '../data/carwash.js';
-import { boulevard } from '../data/boulevard.js';
+// Griglie + livelli del gioco per "Carica livello…".
+import { testedo } from '../data/testedo.js';
+import { LEVELS } from '../config.js';
 
-const EXISTING = { skyline, skyline2, metro2, carwash, boulevard };
+// Griglie indicizzate per mapKey (rispecchia MAPS in main.js). PROVVISORIO: tutti
+// i livelli del gioco condividono `testedo` finché non si creano i percorsi veri.
+const MAPS = { testedo };
 
 // --- Costanti griglia (da config.js) ---------------------------------------
 const ROWS = 12;
@@ -141,8 +140,8 @@ function buildLegend() {
     '<b>Griglia:</b> riga 9 = terra (i tile poggiano sulla linea bianca = superficie del ' +
     'pavimento), righe 10-11 = pavimento pieno (bloccate, solo render), ' +
     'righe 0-1 = zona morte soffitto.<br><br>' +
-    '<b>Regole rapide:</b> salto ~3 tile, atterraggio ≤ +2 (≤ +3 con orb), ' +
-    'gap ≤ 5 tile, max 4 hazard a terra contigui, esattamente 5 monete. ' +
+    '<b>Regole rapide:</b> salto ~2 tile, atterraggio ≤ +1 (+2 con orb/scaletta), ' +
+    'gap ≤ 4 tile, max 3 hazard a terra contigui, esattamente 5 monete. ' +
     'Sezione ship: apri con 3, chiudi con 4; 7 e 2 mai nella stessa colonna.';
 }
 
@@ -697,14 +696,15 @@ const btnManage = document.getElementById('btnManage');
 const editBanner = document.getElementById('editBanner');
 const editBannerName = document.getElementById('editBannerName');
 
-// Abilita/disabilita Anteprima e Salva nel gioco in base alla validità.
+// "Salva nel gioco" resta gated sulla validità (non mettere livelli imbattibili
+// nel carosello); "Anteprima" è SEMPRE attiva — si può provare anche un percorso
+// non ancora valido per capire dove si rompe.
 function syncActionButtons() {
-  for (const b of [btnPreview, btnPlay]) {
-    if (!b) continue;
-    b.disabled = !lastValid;
-    b.style.opacity = lastValid ? '1' : '0.45';
-    b.style.cursor = lastValid ? 'pointer' : 'not-allowed';
-    b.title = lastValid ? '' : 'Il livello deve essere valido (vedi pannello Validazione)';
+  if (btnPlay) {
+    btnPlay.disabled = !lastValid;
+    btnPlay.style.opacity = lastValid ? '1' : '0.45';
+    btnPlay.style.cursor = lastValid ? 'pointer' : 'not-allowed';
+    btnPlay.title = lastValid ? '' : 'Il livello deve essere valido per salvarlo nel gioco';
   }
 }
 
@@ -760,10 +760,29 @@ function openImport() {
   resetModalExtras();
   modalTitle.textContent = 'Carica livello';
   modalNameRow.style.display = 'none';
+
+  // Sezione 1: TUTTI i livelli del gioco (LEVELS di config) con i nomi reali.
+  // Caricarli = rimixarli come NUOVO (editing=null); la griglia è MAPS[mapKey].
+  const gameBtns = LEVELS
+    .filter(l => MAPS[l.mapKey])
+    .map(l => `<button class="btn ghost small" data-game="${escapeHtml(l.mapKey)}">${escapeHtml(l.name)}</button>`)
+    .join(' ');
+
+  // Sezione 2: livelli custom salvati (localStorage). Caricarli = MODIFICA in
+  // loco (al salvataggio si sovrascrive). Nascosta se non ce ne sono.
+  const customBtns = getCustomLevels()
+    .map(c => `<button class="btn ghost small" data-cust="${escapeHtml(c.id)}">${escapeHtml(c.name)}</button>`)
+    .join(' ');
+
   modalHint.innerHTML =
-    'Scegli un livello esistente da modificare, oppure incolla un array di 12 stringhe ' +
-    '(il contenuto di <code>export const X = [ … ]</code>) e premi <b>Carica</b>.<br><br>' +
-    Object.keys(EXISTING).map(k => `<button class="btn ghost small" data-load="${k}">${k}</button>`).join(' ');
+    'Scegli un livello da cui partire, oppure incolla un array di 12 stringhe ' +
+    '(il contenuto di <code>export const X = [ … ]</code>) e premi <b>Carica da testo</b>.<br><br>' +
+    '<div style="font-size:12px;opacity:0.7;margin:4px 0;">Livelli del gioco</div>' +
+    gameBtns +
+    (customBtns
+      ? '<div style="font-size:12px;opacity:0.7;margin:10px 0 4px;">Livelli custom salvati</div>' + customBtns
+      : '');
+
   modalText.value = '';
   modalText.placeholder = '[\n  "000…",\n  …12 righe…\n]';
   modalAction.textContent = 'Carica da testo';
@@ -771,20 +790,25 @@ function openImport() {
     const strs = parsePastedGrid(modalText.value);
     if (!strs) { alert('Non riesco a leggere un array di 12 stringhe da quel testo.'); return; }
     fromStrings(strs);
-    // "Carica livello" parte da un livello ORIGINALE/incollato: NON è la modifica
-    // di un custom esistente, quindi esci dalla modalità modifica.
     editing = null; updateEditBanner();
     scrollX = 0; clampScroll(); scheduleValidate(); draw(); hideModal();
   };
   modalName.oninput = null;
   showModal();
-  // bottoni "carica livello esistente"
-  modalHint.querySelectorAll('[data-load]').forEach(btn => {
+
+  // Livello del gioco -> rimix come NUOVO (editing=null); griglia = MAPS[mapKey].
+  modalHint.querySelectorAll('[data-game]').forEach(btn => {
     btn.addEventListener('click', () => {
-      fromStrings(EXISTING[btn.dataset.load].slice());
+      const grid = MAPS[btn.dataset.game];
+      if (!grid) { alert('Griglia non trovata.'); return; }
+      fromStrings(grid.slice());
       editing = null; updateEditBanner();
       scrollX = 0; clampScroll(); scheduleValidate(); draw(); hideModal();
     });
+  });
+  // Livello custom salvato -> modalità MODIFICA (sovrascrive al salvataggio).
+  modalHint.querySelectorAll('[data-cust]').forEach(btn => {
+    btn.addEventListener('click', () => loadCustomForEdit(btn.dataset.cust));
   });
 }
 
@@ -978,7 +1002,8 @@ const previewExit = document.getElementById('previewExit');
 let preview = null;
 
 function openPreview() {
-  if (!lastValid) { alert('Il livello non è valido: non è giocabile finché non sistemi gli errori (pannello Validazione).'); return; }
+  // Sempre giocabile, anche se la validazione non è tutta verde: serve proprio a
+  // provare il percorso e capire dove si rompe.
   previewOverlay.classList.add('show');
   // Istanza nuova ogni volta sulla griglia corrente (throwaway, niente salvataggi).
   preview = new PlaytestPreview(previewCanvas, toStrings(), { onExit: closePreview });
