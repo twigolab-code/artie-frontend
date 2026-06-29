@@ -487,9 +487,10 @@ Directional gameplay analytics, **anonymous by design** — no personal data lea
 nickname, NO persistent device id, only an ephemeral per-session pseudonym (`sessionId`). The backend
 is meant to keep aggregate stats. The backend is two AWS Lambda Function URLs (eu-central-1):
 a `/session` handshake and an `/ingest` endpoint, **reached via Cloudflare-proxied subdomains**
-(`session.<domain>` / `ingest.<domain>`) — NOT the direct `*.lambda-url.…on.aws` URLs, which are
-**origin-locked and return 403**. (`<domain>` is a placeholder `artie.example` until the backend
-provides the real proxied domain; swap it in `.env*` + `_headers` together.)
+(`session.og-dash.it` / `ingest.og-dash.it`) — NOT the direct `*.lambda-url.…on.aws` URLs, which are
+**origin-locked and return 403**. The site is served from the apex `og-dash.it` (Cloudflare Pages).
+(If the domain ever changes, swap it in `.env*` + `_headers` together — the CSP `connect-src` origins
+must match `VITE_ARTIE_*_URL` exactly.)
 
 - **Identity (anonymous):** the ONLY identifier is `sessionId` = fresh UUID per page load (= per play
   session), **ephemeral, never written to localStorage**, so it can't track a device over time or be
