@@ -202,13 +202,18 @@ builder.html           Standalone editor page (NOT part of the game); Vite multi
   (hidden in portrait — `#rotate` wins, lower z-index). In standalone (goal reached) it never appears.
 - **Mobile UI scale (`uiScale()`):** the scene is a fixed 1280×720 fit-to-contain, so on a phone the
   UI looks tiny. `uiScale()` returns **1 on fine pointer (desktop → unchanged)**; on coarse pointer
-  it grows as the fit-scale shrinks (`UI_SCALE_PIVOT/fit`, clamped `[1, UI_SCALE_MAX]`).
-  `pushUiScale()`/`popUiScale()` wrap the **UI block of each menu draw** (after the background, which
-  stays full-bleed/**uncropped**) in a scale-about-logical-center transform — enlarges
-  panels/buttons/icons/text uniformly with no per-element edits. Wrapped: `drawPreHome`/`drawHome`/
-  `drawLoader`/`drawLevels`/`drawComplete`/`drawOptions`/`drawStats`/`drawPlayers`/`drawPauseOverlay`.
+  it grows as the fit-scale shrinks (`UI_SCALE_PIVOT/fit`, capped at `UI_SCALE_MAX`), then is
+  **clamped DOWN so the center-scaled content box fits the visible safe-box** — so on odd/narrow
+  aspect ratios (e.g. Samsung S8+ 18.5:9, notch devices) it can return **< 1** to avoid clipping the
+  logo top / Options bottom buttons. The clamp uses `UI_CONTENT_HALF_W/H` (the authored content's
+  half-extents from logical center 640,360) against `renderer.safe*`. `pushUiScale()`/`popUiScale()`
+  wrap the **UI block of each menu draw** (after the background, which stays full-bleed/**uncropped**)
+  in a scale-about-logical-center transform — enlarges/shrinks panels/buttons/icons/text uniformly
+  with no per-element edits. Wrapped: `drawPreHome`/`drawHome`/`drawLoader`/`drawLevels`/`drawComplete`/
+  `drawOptions`/`drawStats`/`drawPlayers`/`drawPauseOverlay`.
   Hit-testing: the `pointerdown` handler maps the pointer with `unscalePoint(p)` (inverse center-scale)
-  for all UI/pause-overlay states, so every rect helper stays unchanged. The nickname `<input>` (DOM)
+  for **center-scaled** rects (home/options +-/mute/back/player-slots/pause-overlay), and uses the
+  **RAW `p`** for the **edge-anchored** arrows (see Back navigation). The nickname `<input>` (DOM)
   mirrors the same scale in `positionNickInput()`.
 - **Mobile fullscreen sizing:** `Renderer._resize()` also listens on `orientationchange` and
   `visualViewport` (`resize`/`scroll`) so the letterbox recomputes cleanly when Safari's address bar
@@ -222,9 +227,13 @@ builder.html           Standalone editor page (NOT part of the game); Vite multi
 - **Mobile nickname `<input>`:** font-size clamped to ≥16px (below 16px iOS auto-zooms on focus);
   repositioned on `visualViewport` `resize`/`scroll` + on `focus` (so it tracks the keyboard) and given
   `z-index:5` (above canvas, below banner/rotate). `positionNickInput()` also applies `uiScale()`.
-- **Back navigation:** a shared "indietro" arrow (`backArrowRect()` + `arrow(rect,-1)`, top-left) is
-  drawn and hit-tested on `players`/`levels`/`options`/`stats` → returns to `home`. On `levels`/`players`
-  the arrow is checked first (priority over "click = play"/select).
+- **Back navigation + carousel arrows (edge-anchored):** the shared "indietro" arrow (`backArrowRect()`
+  + `arrow(rect,-1)`, top-left) and the Levels carousel side arrows (`arrowRects()`) are anchored to the
+  **true visible edges** (`renderer.safeLeft/safeRight/safeTop`) and sized ×`uiScale()`, like the HUD —
+  NOT center-scaled. So they're **drawn OUTSIDE `pushUiScale`** (after `popUiScale()`) in every screen
+  (`drawLevels`/`drawOptions`/`drawStats`/`drawPlayers`) and **hit-tested with the RAW pointer `p`**
+  (not `unscalePoint`). This keeps them at the real screen edges on wide screens and on-screen on narrow
+  ones. On `levels`/`players` the back arrow is checked first (priority over "click = play"/select).
 - **Persistence (localStorage):** `gd_bestCoins` (per-level coin record), `gd_levelStats`
   (per-level bestPct/attempts/jumps), `gd_nickname` (player nickname — local only, **never sent** to
   telemetry; see §12), `gd_customLevels` (levels created in the
