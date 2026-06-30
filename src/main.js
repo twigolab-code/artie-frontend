@@ -24,6 +24,7 @@ import { CityBackground } from './effects/CityBackground.js';
 import { ImageBackground } from './effects/ImageBackground.js';
 import { LaBackground } from './effects/LaBackground.js';
 import { testedo } from './data/testedo.js';
+import { metro } from './data/metro.js';
 import { getCustomLevels } from './data/customLevels.js';
 import { getSkin, LOGO_IMG, BG2_IMG, COIN_IMG, OPTIONS_IMG, STATS_IMG, getLevelBg, fontState } from './engine/Assets.js';
 import { aabbOverlap } from './game/Collision.js';
@@ -140,10 +141,11 @@ function unscalePoint(p) {
   return { x: cx + (p.x - cx) / s, y: cy + (p.y - cy) / s };
 }
 
-// Mappe disponibili, indicizzate per mapKey del livello. PROVVISORIO: c'è solo
-// `testedo` (tutti i livelli la condividono come segnaposto, vedi LEVELS in config).
+// Mappe disponibili, indicizzate per mapKey del livello. `testedo` = percorso di
+// Car Wash (e segnaposto dei livelli coming-soon, mai caricati); `metro` = percorso
+// dedicato di Metro (vedi LEVELS in config).
 // I livelli custom aggiungono a runtime le loro chiavi 'custom-*' (loadCustomLevels).
-const MAPS = { testedo };
+const MAPS = { testedo, metro };
 
 // --- Tema colore dello sfondo (transizione morbida tra le sezioni) ----------
 // Lerp RGB di due colori hex -> stringa 'rgb(...)'.
@@ -342,8 +344,9 @@ function restart() {
   runJumps = 0;
   prevJumpCount = player.jumpCount;
   prevAlive = true;
-  // Musica di gioco: riparte da capo a ogni avvio livello / morte / tentativo.
-  audio.setTrack('game', { restart: true });
+  // Musica di gioco: brano dedicato del livello se definito (LEVELS.music),
+  // altrimenti 'game'. Riparte da capo a ogni avvio livello / morte / tentativo.
+  audio.setTrack(lvl().music || 'game', { restart: true });
   // Telemetria: nuovo tentativo → cattura attemptStart + emette level_start.
   analytics.trackLevelStart(levelIndex + 1, attempts);
 }
@@ -1380,7 +1383,10 @@ function drawPauseOverlay() {
 // Sfondo di anteprima comune alle schermate (sfondo del livello evidenziato).
 function screenBackdrop() {
   const ctx = renderer.ctx;
-  currentBg().render(renderer, 0, 0, themeFor(0));
+  // Sfondo a piena altezza nei menu (fino al fondo schermo): per gli sfondi a
+  // immagine evita la fascia scura sotto FLOOR_Y dove non c'è pavimento procedurale.
+  // Le bg procedurali ignorano gli argomenti extra (già riempiono fino a extBottom).
+  currentBg().render(renderer, 0, 0, themeFor(0), 0, renderer.extBottom);
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
   ctx.fillRect(renderer.extLeft, renderer.extTop, renderer.extRight - renderer.extLeft, renderer.extBottom - renderer.extTop);
 }
@@ -1736,11 +1742,14 @@ function drawLevels() {
   const L = LEVELS[levelIndex];
   const theme = { top: lerpColor(L.cube.top, L.ship.top, 0), bottom: lerpColor(L.cube.bottom, L.ship.bottom, 0) };
 
-  // Anteprima sfondo del livello, clippata nel pannello.
+  // Anteprima sfondo del livello, clippata nel pannello. Solo CIELO: per gli sfondi
+  // a immagine ritaglio la fascia bassa (il pavimento dipinto nell'asset) con
+  // cropBottomFrac, così l'anteprima mostra solo lo sfondo, senza pavimento. (Le
+  // background procedurali ignorano l'argomento extra.)
   ctx.save();
   roundRect(ctx, px, py, pw, ph, 22);
   ctx.clip();
-  getBg(L.bg).render(renderer, levelIndex * 900 + 200, 0, theme);
+  getBg(L.bg).render(renderer, levelIndex * 900 + 200, 0, theme, 0.24);
   ctx.fillStyle = 'rgba(0,0,0,0.32)';
   ctx.fillRect(px, py, pw, ph);
   ctx.restore();
@@ -1762,40 +1771,38 @@ function drawLevels() {
     ctx.restore();
   }
 
-  // Nome livello + difficoltà dentro il pannello.
+  // Nome livello dentro il pannello (niente più barra difficoltà: rimossa su
+  // richiesta — non specifichiamo più le difficoltà).
   text(L.name.toUpperCase(), LOGICAL_WIDTH / 2, py + 90, 50);
-  // Barra "difficoltà" stile GD.
-  const barW = pw - 120;
-  const barX = (LOGICAL_WIDTH - barW) / 2;
-  const barY = py + 150;
-  drawGdBar(barX, barY, barW, 46, L.diffFrac ?? 0.5, `DIFFICOLTÀ: ${L.diff.toUpperCase()}`);
 
-  text(`LIVELLO ${levelIndex + 1} / ${LEVELS.length}`, LOGICAL_WIDTH / 2, py + 232, 28, UI.yellow);
-  // Tag "CUSTOM" per i livelli creati col Game Builder (L.custom).
-  if (L.custom) text('CUSTOM', LOGICAL_WIDTH / 2, py + 256, 18, '#5fd000');
-
-  // Record monete del livello: riga di icone (piene = raccolte nel record).
-  const best = getBestCoins(L.id);
-  const cr = 15;
-  const cgap = cr * 2 + 12;
-  const rowW = (COINS_PER_LEVEL - 1) * cgap;
-  const x0 = LOGICAL_WIDTH / 2 - rowW / 2;
-  for (let i = 0; i < COINS_PER_LEVEL; i++) {
-    drawCoinIcon(x0 + i * cgap, py + 278, cr, i < best);
-  }
-
-  // Statistiche persistenti del livello (% migliore, tentativi e salti totali).
-  const st = getStats(L.id);
-  text(
-    `MIGLIORE ${st.bestPct}%   •   TENTATIVI ${st.attempts}   •   SALTI ${st.jumps}`,
-    LOGICAL_WIDTH / 2,
-    py + 328,
-    22
-  );
-
-  // Scritta "COMING SOON" sopra al contenuto, ben centrata nel pannello.
   if (L.comingSoon) {
-    text('COMING SOON', LOGICAL_WIDTH / 2, py + ph / 2, 56, UI.yellow);
+    // "Coming soon": solo nome (in alto) + grande scritta centrata. Niente
+    // "LIVELLO X/Y" né monete/stats (eviterebbero anche la sovrapposizione).
+    text('COMING SOON', LOGICAL_WIDTH / 2, py + ph / 2 + 20, 56, UI.yellow);
+  } else {
+    // Livello giocabile: numero livello, eventuale tag CUSTOM, monete e statistiche.
+    text(`LIVELLO ${levelIndex + 1} / ${LEVELS.length}`, LOGICAL_WIDTH / 2, py + 168, 28, UI.yellow);
+    // Tag "CUSTOM" per i livelli creati col Game Builder (L.custom).
+    if (L.custom) text('CUSTOM', LOGICAL_WIDTH / 2, py + 196, 18, '#5fd000');
+
+    // Record monete del livello: riga di icone (piene = raccolte nel record).
+    const best = getBestCoins(L.id);
+    const cr = 15;
+    const cgap = cr * 2 + 12;
+    const rowW = (COINS_PER_LEVEL - 1) * cgap;
+    const x0 = LOGICAL_WIDTH / 2 - rowW / 2;
+    for (let i = 0; i < COINS_PER_LEVEL; i++) {
+      drawCoinIcon(x0 + i * cgap, py + 240, cr, i < best);
+    }
+
+    // Statistiche persistenti del livello (% migliore, tentativi e salti totali).
+    const st = getStats(L.id);
+    text(
+      `MIGLIORE ${st.bestPct}%   •   TENTATIVI ${st.attempts}   •   SALTI ${st.jumps}`,
+      LOGICAL_WIDTH / 2,
+      py + 304,
+      22
+    );
   }
 
   // Pallini indicatore (parte del pannello centrato → restano dentro pushUiScale).

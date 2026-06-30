@@ -21,9 +21,10 @@ Italian; this guide is in English.
 - `npm run preview` — serve the built `dist/`.
 - Entry chain: `index.html` → `src/main.js`. Static assets (player skins, logo, backgrounds,
   coin, palm) live in `public/` and are referenced by absolute path. Images are **WebP**
-  (e.g. `/artie-cube.webp`), the menu track is **AAC** (`/home.m4a`), the in-level track stays
-  `/game.mp3`, the UI font is `/SoccerLeague.ttf`. `scripts/optimize-assets.sh` regenerates the
-  optimized assets (uses `cwebp` + macOS `afconvert`; also produces the **PWA icons** —
+  (e.g. `/artie-cube.webp`), the music tracks are **MP3** (`/home.mp3` menu, `/game.mp3` default
+  in-level, plus the per-level `/carwash.mp3` and `/metro.mp3`), the UI font is `/SoccerLeague.ttf`.
+  `scripts/optimize-assets.sh` regenerates the
+  optimized assets (uses `cwebp`; audio mp3s ship as-is — no conversion; also produces the **PWA icons** —
   `apple-touch-icon.png` 180, `icon-192/512.png`, `icon-maskable-512.png` — from `artie-cube.webp`
   via `dwebp`+`sips`); run it if you add/replace an asset.
   `vite.config.js` uses `base: './'` (relative paths). The vector fallback in `Assets.js` covers a
@@ -57,7 +58,7 @@ src/
     Renderer.js        Canvas2D wrapper; DPR resize + letterbox; logical-coord drawing (begin(), rect(), ctx, extLeft/Top/Right/Bottom). Also exposes safe-area insets in LOGICAL coords (safeLeft/Right/Top/Bottom = ext* inset by `env(safe-area-inset-*)`, read via a hidden probe div) for notch-safe HUD placement
     GameLoop.js        Fixed-timestep 60Hz loop (accumulator + interpolation alpha)
     Input.js           Keyboard/mouse/touch → jump; held (continuous) + consumePress() (edge, used by orbs)
-    Audio.js           Music: two looped tracks from `MUSIC_TRACKS` (public/ `home.m4a`/`game.mp3`, routed via `music` gain); `setTrack('home'|'game', {restart})` switches them (menus=home, playing=game; game restarts each attempt); `stopMusic()` pauses all tracks immediately (used on death). Falls back to a synth beat (BPM 128) if files are missing. Beat clock always runs for `beatPhase()` (visual pulse). SFX: coin is synth (`_tone`); **file-based one-shots** via `playSfxFile(key)` → bool (fetch→`decodeAudioData`→`AudioBufferSource`, buffers from `SFX_FILES` preloaded in `unlock()`) — the player-select "tag" sounds (`tag-artie`/`tag-miles`), the **death** sound (`death-artie`, `playDeath` falls back to the synth `_tone` if the buffer isn't decoded yet), and the **loader** jingle (`loader` = `tag-tutto-fatto.MP3`). `playSfxOnce(key, onEnded)` is the same pipeline but returns the buffer's `duration` and fires `onEnded` at the end (used by the fake loader to size/finish itself). Both routed via `sfx` gain (respect SFX volume + mute). Music can be silenced per-screen via `setMusicSilenced(bool)` — a `_musicScreenMul` (0/1) multiplied into the `music` gain (single writer `_applyMusicGain()`) WITHOUT touching the persisted `_musicVol`; `main.js` drives it from `gameState` (muted on `players` so the tags stand out). Persistent volume/mute
+    Audio.js           Music: looped tracks from `MUSIC_TRACKS` (public/ `home.mp3`/`game.mp3` + per-level `carwash.mp3`/`metro.mp3`, routed via `music` gain); `_initMusicFiles()` is generic over the keys, so `setTrack(name, {restart})` works for ANY `MUSIC_TRACKS` key (menus=home, playing=`lvl().music || 'game'`; the level track restarts each attempt); `stopMusic()` pauses all tracks immediately (used on death). Falls back to a synth beat (BPM 128) if files are missing. Beat clock always runs for `beatPhase()` (visual pulse). SFX: coin is synth (`_tone`); **file-based one-shots** via `playSfxFile(key)` → bool (fetch→`decodeAudioData`→`AudioBufferSource`, buffers from `SFX_FILES` preloaded in `unlock()`) — the player-select "tag" sounds (`tag-artie`/`tag-miles`), the **death** sound (`death-artie`, `playDeath` falls back to the synth `_tone` if the buffer isn't decoded yet), and the **loader** jingle (`loader` = `tag-tutto-fatto.MP3`). `playSfxOnce(key, onEnded)` is the same pipeline but returns the buffer's `duration` and fires `onEnded` at the end (used by the fake loader to size/finish itself). Both routed via `sfx` gain (respect SFX volume + mute). Music can be silenced per-screen via `setMusicSilenced(bool)` — a `_musicScreenMul` (0/1) multiplied into the `music` gain (single writer `_applyMusicGain()`) WITHOUT touching the persisted `_musicVol`; `main.js` drives it from `gameState` (muted on `players` so the tags stand out). Persistent volume/mute
     Assets.js          Async image cache w/ vector fallback; getSkin(), LOGO_IMG/BG2_IMG/COIN_IMG/PALM_IMG/OPTIONS_IMG/STATS_IMG (all WebP), `getLevelBg(name)` (cached lazy loader for the heavy level bg WebPs `LA`/`metro`/`wash`/`boulevard`, not loaded on home), fontState (local `SoccerLeague` font via @font-face in index.html)
     Analytics.js       Fail-silent **anonymous** telemetry (see §12): no personal data — NO nickname, NO persistent device id. Only an **ephemeral** per-load `sessionId` (never stored in localStorage) + per-flush `batchId`; `/session` handshake → Bearer token; in-memory event buffer flushed every 30 s (≤200/batch, splits, backoff+jitter on 429/5xx, 413→smaller batches); unload via `navigator.sendBeacon` (token in body `_t`). No-op unless `VITE_ARTIE_SESSION_URL`/`VITE_ARTIE_INGEST_URL` are set; never awaited on the loop
   game/
@@ -81,10 +82,11 @@ src/
     Background.js      Generic neon parallax grid (3 layers, beat pulse, theme lerp)
     CityBackground.js  Red skyline (procedural buildings, 3 tiers, clouds)
     LaBackground.js    Sunset beach (sun, palms, houses, ferris wheel, pier, lamp)
-    ImageBackground.js Image-tiled background (sky-only, horizontal loop, slow parallax; scales any image to sky height so differently-sized sources sync visually). One instance per image bg, built lazily in `getBg()` via `getLevelBg()`
+    ImageBackground.js Image-tiled background (horizontal loop, slow parallax; scales any image to the draw height so differently-sized sources sync visually). `render(renderer, cameraX, beatPulse, theme, cropBottomFrac=0, bottomY=FLOOR_Y)`: by DEFAULT draws sky-only (extTop→FLOOR_Y; in-game the procedural floor covers below). `bottomY` extends the fill to an arbitrary bottom — the menu **`screenBackdrop`** passes `renderer.extBottom` so the image is full-bleed (no dark band under FLOOR_Y where menus have no procedural floor). `cropBottomFrac` crops the bottom fraction of the SOURCE image (the painted floor) so a preview shows sky only (level-select panel passes 0.24). One instance per image bg, built lazily in `getBg()` via `getLevelBg()`
   data/
     _grid.js           Helpers: ROWS=12, gap(w), assemble(...segments)
-    testedo.js         The ONLY shipped map (flat array of 12 strings, builder-made). PROVVISORIO: all 6 LEVELS share it via mapKey 'testedo' (each keeps its own colors). The 5 old hand-coded maps (skyline/skyline2/metro2/carwash/boulevard) were REMOVED — future paths are authored in the Builder
+    testedo.js         Builder-made map (flat array of 12 strings). It's **Car Wash's (L1) path** (mapKey 'testedo') and the inert placeholder mapKey of the 3 coming-soon levels (never loaded). The old TESTEDO carousel entry was removed but this file/grid stays. The old hand-coded maps were REMOVED — future paths are authored in the Builder
+    metro.js           Metro's dedicated builder-made path (flat array of 12 strings). Imported as-is on user request: it does NOT pass scripts/check-levels.mjs (spike in ship death-zone rows 0-1, >4 contiguous ground hazards, spike on a block top) and is intentionally NOT listed in the checker
     validate.js        SHARED level validator (pure fns over a grid): invariants() + playable() (cube-physics BFS). Imported by BOTH scripts/check-levels.mjs (Node) and src/builder/builder.js (browser) → single source of truth. Mirrors config.js @630
     customLevels.js    SHARED custom-level store (localStorage 'gd_customLevels'): THEME_PRESETS, DIFFS, get/save(upsert by id)/delete + buildCustomEntry() + uniqueCustomId(). Imported by the builder (create/edit/delete) and main.js loadCustomLevels() (reads) — see §13
   builder/
@@ -117,8 +119,8 @@ builder.html           Standalone editor page (NOT part of the game); Vite multi
 - Per-frame handlers in `update(dt)`: `handleOrbs` (touch + `consumePress` → jump),
   `handlePortals` (mode switch + theme lerp + PortalFx), `handlePads` (auto-jump), `handleCoins`
   (collect). On death: `audio.stopMusic()` (background music cuts immediately so only the death SFX
-  is heard) + play SFX once, spawn particles, ~0.7s timer, then restart (which re-plays `game` from
-  the top via `setTrack('game', {restart:true})`).
+  is heard) + play SFX once, spawn particles, ~0.7s timer, then restart (which re-plays the level
+  track from the top via `setTrack(lvl().music || 'game', {restart:true})`).
 - **Victory (esultanza):** on `player.x >= finishX` the win block (still firing `saveBestCoins` /
   `commitRunStats` / `analytics.trackLevelClear` **exactly once**) calls
   `victoryAnim.start({ player, fillBottom: lvl().obstacleBottom, color: ply().fx.star, shape: ply().fx.shape })`
@@ -165,7 +167,9 @@ builder.html           Standalone editor page (NOT part of the game); Vite multi
   instagram.com/twigolab, `target="_blank" rel="noopener"`). Drawn discreetly (semi-transparent white
   text + dim-yellow links, full-yellow on hover) bottom-center, safe-area-aware. `pointer-events:none`
   on the container with `pointer-events:auto` only on the links, so taps around the text fall through to
-  the canvas. `updateCredits()` (called from `render()` and `onOrientationChange()`, mirrors
+  the canvas. (On touch the links also rely on `Input.js` tap-exempting `<a>`/`<button>` via
+  `isInteractiveTarget` — otherwise the global `touchstart` `preventDefault` cancels the navigation; see
+  §10.) `updateCredits()` (called from `render()` and `onOrientationChange()`, mirrors
   `updateInstallHint`) toggles `block`/`none`: visible in **all menus**, hidden during `playing` (so it
   never disturbs the game) and while `orientationBlocked` (portrait — `#rotate` wins). z-index 8 (under
   `#installHint`=9, `#rotate`=10). NOT scaled by `uiScale()` — a fixed DOM element with a `clamp()`
@@ -270,9 +274,10 @@ builder.html           Standalone editor page (NOT part of the game); Vite multi
   and cost nothing in cube mode.
 - **Music follows state:** `prehome` and `loader` are **silent** for music (`Audio._currentTrack`
   starts `null`; the loader only plays its one-shot jingle). The first music starts when
-  `enterHome()` (end of the loader) calls `audio.setTrack('home')`. Thereafter menus
+  `enterHome()` (end of the loader) calls `audio.setTrack('home')` (= `home.mp3`). Thereafter menus
   (`home`/`players`/`levels`/`options`/`stats`) play the `home` track; entering a level (`restart()`)
-  plays `game` (restarted each attempt); leaving `complete` back to `levels` returns to `home` (see
+  plays the level's track — `lvl().music || 'game'` (Car Wash→`carwash`, Metro→`metro`, the rest
+  →`game`), restarted each attempt; leaving `complete` back to `levels` returns to `home` (see
   `audio.setTrack` calls in `main.js`).
 - **Telemetry wiring (fail-silent, off the critical path — full contract in §12):** the `analytics`
   singleton (`engine/Analytics.js`) is fed from six game seams in `main.js`, each a single call:
@@ -294,8 +299,19 @@ rotation reads snappier. **The bundled levels were authored for the OLD longer j
   `angle` toward `_targetAngle` and **stops at the target** (no free-spin); `_land()` snaps to the
   nearest 90° so the cube rests at 0/90/180/270°; orbs call `jump()` → 180°, pads add `+= Math.PI` too),
   `PLAYER_SIZE = 60`.
-- **Ship (jetpack):** `SHIP_GRAVITY = GRAVITY * 0.42`, `SHIP_THRUST = GRAVITY * 0.95`,
-  `SHIP_MAX_RISE = -832`, `SHIP_MAX_FALL = 988`, `SHIP_MAX_TILT = 0.5`, `SHIP_TILT_LERP = 0.18`.
+- **Ship (jetpack):** `SHIP_GRAVITY = GRAVITY * 0.32`, `SHIP_THRUST = GRAVITY * 0.75`,
+  `SHIP_MAX_RISE = -620`, `SHIP_MAX_FALL = 620`, `SHIP_MAX_TILT = 0.6`, `SHIP_TILT_LERP = 0.3`.
+  Tuned for a **GD-like feel**: **constant gravity** like the real GD ship (no piecewise/ease-in
+  fall — that's cube-only), but **gentle**, so the fall builds gradually (terminal at ~0.32s / ~1.67
+  tiles instead of ~0.2s / ~0.9 tile) → it stays stable/controllable and doesn't immediately dive.
+  The **climb is unchanged**: net up = `SHIP_THRUST − SHIP_GRAVITY` = 2580 u/s² (lowering gravity by
+  900 is matched by lowering thrust 900). **Symmetric caps** ±620 ≈ ±10.3 tiles/s (the longer ramp
+  offsets the slightly higher cap → less twitchy). (Old values `0.47`/`0.9`, caps `±560`, dove too
+  fast.) The
+  **nose-tilt (impennata)** follows vertical velocity like the real GD (`target = (vy/SHIP_MAX_FALL)
+  * SHIP_MAX_TILT`, lerped — "rotation = velocity × factor", the nose points where the ship is
+  heading), NOT the thrust input; `SHIP_MAX_TILT 0.6`/`SHIP_TILT_LERP 0.3` make it marked + snappy
+  (nose lifts as the ship climbs, no lag), normalized by `SHIP_MAX_FALL` so it auto-rescales.
   **Top of screen (y ≤ 0) is instant death**; the floor is a safe landing.
 - **Items:** `PAD_VELOCITY = -2200` (stronger than a jump, cube only; bumped from -1950 so pad apex
   stays ~6.4 tiles under the higher gravity), `ORB_RADIUS = 26`, `COINS_PER_LEVEL = 5`.
@@ -311,9 +327,11 @@ rotation reads snappier. **The bundled levels were authored for the OLD longer j
   in `Player._renderCube` (the PNG skin is unaffected). `_renderSpikeFloor` keeps its black/ice look.
 - **Audio:** `BPM = 128`, `MUSIC_VOLUME = 0.5` / `SFX_VOLUME = 0.5` (the audio ALWAYS starts at these
   values, ON at 50%, unmuted, on EVERY launch — not persisted; see §4 Persistence), and
-  `MUSIC_TRACKS = { home: '/home.m4a', game: '/game.mp3' }` — the looped background tracks (drop the
-  files in `public/`; menus play `home`, levels play `game` via `audio.setTrack`; if absent, the
-  synth beat plays instead). `SFX_FILES = { 'tag-artie', 'tag-miles', 'death-artie', loader }`
+  `MUSIC_TRACKS = { home: '/home.mp3', game: '/game.mp3', carwash: '/carwash.mp3', metro: '/metro.mp3' }`
+  — the looped background tracks (drop the files in `public/`; menus play `home`, a level plays
+  `lvl().music` if set else `game`, via `audio.setTrack`; if absent, the synth beat plays instead). A
+  level opts into a dedicated track with a `music: '<MUSIC_TRACKS key>'` field on its `LEVELS` entry
+  (today: Car Wash→`carwash`, Metro→`metro`); omit it to use `game`. `SFX_FILES = { 'tag-artie', 'tag-miles', 'death-artie', loader }`
   (→ `*.MP3`; `loader` = `tag-tutto-fatto.MP3`) — file-based one-shot SFX (player-select tags, the
   death sound, the fake-loader jingle), preloaded in `Audio.unlock()` and played via
   `audio.playSfxFile(key)` / `playSfxOnce(key, onEnded)` (no-op until decoded). **Note the uppercase
@@ -406,25 +424,35 @@ maps should follow the limits below.
 3. **`src/config.js`** — add an entry to the `LEVELS` array:
    ```js
    {
-     id: '<name>', name: '<Display>', diff: 'Medio',   // Facile | Medio | Difficile
+     id: '<name>', name: '<Display>', diff: 'Medio',   // diff/diffFrac = inert metadata (NOT drawn in the carousel; Builder-only)
      bg: 'losangeles', floor: 'city',                  // 'neon' | 'city' | 'la' | 'losangeles'
      cube: LA_CUBE, ship: LA_SHIP,                     // a {top,bottom} theme pair from config
      obstacleBottom: '#8a3a12',                        // bottom of the spike/block gradient (top stays near-black); coherent w/ bg
      scrollSpeed: 630, mapKey: '<name>', diffFrac: 0.55,
-     // comingSoon: true,   // OMIT to make the level selectable/playable
+     // music: '<MUSIC_TRACKS key>', // OPTIONAL dedicated track; omit → 'game'
+     // comingSoon: true,   // set to lock the level (dark veil + "COMING SOON", no coins/stats, not launchable)
    }
    ```
-   `mapKey` must match both the `data/` export and the `MAPS` key.
+   `mapKey` must match both the `data/` export and the `MAPS` key. Add an optional `music` field
+   (a key of `MUSIC_TRACKS`) to give the level a dedicated track; omit it to use the default `game`.
+   The carousel **no longer draws a difficulty bar**, so `diff`/`diffFrac` are inert for the game
+   (kept only because the Game Builder reads them for custom levels — §13).
 
 ## 9. Current content
-**PROVVISORIO — all 6 levels share ONE grid (`testedo`).** Every `LEVELS` entry has `mapKey: 'testedo'`,
-so City/Car Wash/Los Angeles/Boulevard/Metro all play the same builder-made path as TESTEDO for now. The
-5 old hand-coded maps were removed; real per-level paths will be authored in the Builder later. **Each
-level still keeps its OWN look:** distinct `bg`/`floor`/`cube`/`ship`/`obstacleBottom`, so the shared path
-renders in each level's colors (City red, Boulevard blue, Metro indigo, …). `obstacleBottom` is applied
-**at render** (`fillBottom = lvl().obstacleBottom` → `level.render` → `obstacle.render`), NOT baked into
-the grid — that's why one grid shows different element colors per level. Per-level **stats/coins are
-independent** (keyed by level `id`, not `mapKey`). `scrollSpeed: 630` for all; exactly 5 coins.
+**5 levels (L1–L5). Only L1 (Car Wash) and L2 (Metro) are playable; L3–L5 are `comingSoon: true`.**
+- **L1 Car Wash** plays the builder-made `testedo` grid (`mapKey: 'testedo'`).
+- **L2 Metro** has its OWN dedicated path (`mapKey: 'metro'`, `src/data/metro.js`) — a builder-made grid
+  imported as-is (it does NOT pass the checker; see below).
+- **L3 Los Angeles / L4 City / L5 Boulevard** are `comingSoon` (dark veil + "COMING SOON", not
+  launchable, **no coins/stats row** shown). They keep `mapKey: 'testedo'` only as an inert placeholder
+  (never loaded). Real per-level paths will be authored in the Builder later.
+The old TESTEDO carousel entry was removed; the `testedo` grid/file stays (it's Car Wash's path).
+**Each level keeps its OWN look:** distinct `bg`/`floor`/`cube`/`ship`/`obstacleBottom`, so a shared path
+renders in each level's colors. `obstacleBottom` is applied **at render** (`fillBottom = lvl().obstacleBottom`
+→ `level.render` → `obstacle.render`), NOT baked into the grid. Per-level **stats/coins are independent**
+(keyed by level `id`, not `mapKey`). `scrollSpeed: 630` for all; exactly 5 coins. The **difficulty bar was
+removed** from the carousel UI — `diff`/`diffFrac` remain on entries as inert metadata (used only by the
+Game Builder for custom levels, §13).
 
 **Validate any map** with `node scripts/check-levels.mjs` (no test harness in the repo). It runs, for
 each shipped map (currently just `testedo`): (1) **invariant checks** — every row same width; exactly 5
@@ -436,17 +464,16 @@ simulator** (BFS proving a survivable path exists end-to-end; mirrors the @630 c
 them. (`_grid.js`'s `gap`/`assemble` are kept for the array format / future segment authoring; testedo
 is a flat array.)
 
-| # | id | name | mapKey | bg | floor | diff | note |
+| L | id | name | mapKey | bg | floor | playable | note |
 |---|----|------|--------|----|----|----|-------|
-| 0 | testedo | TESTEDO | `testedo` | `carwash` | `carwash` | Difficile | the one real builder-made path; leads the carousel |
-| 1 | city | City | `testedo` | `city` | `city` | Facile | testedo grid, City colors (red) |
-| 2 | carwash | Car Wash | `testedo` | `carwash` | `carwash` | Medio | testedo grid, Car Wash colors |
-| 3 | losangeles | Los Angeles | `testedo` | `losangeles` | `la` | Medio | testedo grid, LA colors |
-| 4 | boulevard | Boulevard | `testedo` | `boulevard` | `boulevard` | Difficile | testedo grid, Boulevard colors (blue) |
-| 5 | metro | Metro | `testedo` | `metro` | `metro` | Difficile | testedo grid, Metro colors (indigo) |
+| 1 | carwash | Car Wash | `testedo` | `carwash` | `carwash` | ✅ | plays the builder-made `testedo` grid; music `carwash.mp3` |
+| 2 | metro | Metro | `metro` | `metro` | `metro` | ✅ | OWN dedicated path (`data/metro.js`), indigo; imported as-is, NOT in the checker; music `metro.mp3` |
+| 3 | losangeles | Los Angeles | `testedo` | `losangeles` | `la` | 🔒 coming soon | placeholder grid; not launchable, no coins/stats shown |
+| 4 | city | City | `testedo` | `city` | `city` | 🔒 coming soon | placeholder grid; not launchable, no coins/stats shown |
+| 5 | boulevard | Boulevard | `testedo` | `boulevard` | `boulevard` | 🔒 coming soon | placeholder grid; not launchable, no coins/stats shown |
 
-(Carousel order = `LEVELS` order: TESTEDO → City → Car Wash → Los Angeles → Boulevard → Metro. All share
-the testedo grid until real paths are built; only the visuals differ.)
+(Carousel order = `LEVELS` order: Car Wash → Metro → Los Angeles → City → Boulevard. The carousel opens on
+L1 (Car Wash). Coming-soon levels are still navigable (browsable) but not launchable.)
 
 - **Players (skins only, identical physics):** each `PLAYERS` entry carries BOTH a cube skin
   (`skin`) AND a ship/razzo skin (`ship`): `Artie` (`/artie-cube.webp` + `/dodge-artie.webp`),
@@ -472,6 +499,14 @@ the testedo grid until real paths are built; only the visuals differ.)
   `touchstart` for the jump). In-game jump lives in `Input.js`, separate from the UI handler.
   The only other canvas mouse listeners are the **hover** `mousemove`/`mouseleave` pair (desktop zoom,
   see §4) — they only read the position, never trigger actions, so they don't interfere.
+- **Interactive DOM overlays above the canvas must be tap-exempted in `Input.js`.** `Input.js`'s
+  global `window` `touchstart` calls `e.preventDefault()` (suppresses page scroll/zoom + registers the
+  jump), which **cancels the native click/navigation** of any DOM `<a>`/`<button>` layered over the
+  canvas — so on mobile their taps do nothing. `isInteractiveTarget(e.target)` early-returns (no
+  `preventDefault`, no jump) for editable fields AND `closest('a, button')`, so the `#credits` footer
+  links and `#infoLink`/`#infoClose` work on touch. Add a new clickable DOM `<a>`/`<button>` over the
+  canvas and it's covered automatically; a clickable bare `<div>` (e.g. an overlay backdrop) would NOT
+  be — handle those with their own listener or widen the helper.
 - No automated tests, BUT level data has a checker: `node scripts/check-levels.mjs` (invariants +
   cube-physics playability sim — see §9). Run it after any `src/data/*.js` edit; then `npm run dev`
   (test mobile via DevTools device emulation: portrait shows the `#rotate` overlay + freezes; landscape

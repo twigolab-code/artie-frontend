@@ -9,8 +9,6 @@
 # revalidazione cosi' una sostituzione viene ripresa entro un giorno.
 /*.webp
   Cache-Control: public, max-age=86400, stale-while-revalidate=604800
-/*.m4a
-  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 /*.mp3
   Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 /*.ttf

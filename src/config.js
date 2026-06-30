@@ -92,96 +92,94 @@ export const ROCKET_TINT = '#6a3cff'; // velo/vignette + stelle
 export const ROCKET_STAR_COLOR = '#cdbfff'; // stelle di sfondo
 export const ROCKET_SPEED_LINE_COLOR = '#b8a6ff'; // linee di velocità (warp)
 
-// --- Livelli (dati-driven): sfondo, pavimento, temi, difficoltà, mappa --------
+// --- Livelli (dati-driven): sfondo, pavimento, temi, mappa --------------------
 // `bg`/`floor` = stile sfondo/pavimento; `cube`/`ship` = temi colore (vira ai
 // portali); `scrollSpeed` = pace (uguale 630 per tutti); `mapKey` = quale mappa in
-// data/; `diff`/`diffFrac` = etichetta + riempimento [0,1] della barra difficoltà.
-// PROVVISORIO: tutti i livelli condividono la griglia `testedo` (mapKey: 'testedo')
-// come segnaposto, finché non si creano i percorsi veri di ognuno col Builder. Ogni
-// livello mantiene comunque i SUOI colori (bg/floor/obstacleBottom/cube/ship), così
-// gli elementi (blocchi/spuntoni) restano coerenti con lo sfondo anche se il percorso
-// è lo stesso. `obstacleBottom` è applicato in render (NON è dentro la griglia).
+// data/. `diff`/`diffFrac` restano come metadati inerti (NON più disegnati nel
+// carosello: la barra difficoltà è stata rimossa; il Game Builder li usa ancora per
+// i livelli custom).
+// ORDINE carosello = L1..L5. Solo L1 (Car Wash) e L2 (Metro) sono giocabili; gli
+// altri tre hanno `comingSoon: true` (velo scuro + "COMING SOON", non avviabili).
+// PROVVISORIO: Car Wash usa la griglia builder-made `testedo` (mapKey: 'testedo');
+// Metro ha il suo percorso dedicato (mapKey: 'metro'); i coming-soon tengono
+// `testedo` come segnaposto (non vengono mai caricati). Ogni livello mantiene i SUOI
+// colori (bg/floor/obstacleBottom/cube/ship). `obstacleBottom` è applicato in render
+// (NON è dentro la griglia).
 export const LEVELS = [
   {
-    // Livello creato col Game Builder e importato come built-in (visibile a tutti).
-    // Aspetto Car Wash; messo PRIMO nel carosello (l'ordine non è più strettamente
-    // per difficoltà crescente: questo è un livello difficile in testa).
-    id: 'testedo',
-    name: 'TESTEDO',
-    diff: 'Difficile', // lungo, sezione ship + orb/pad, fino a 4 hazard contigui
-    bg: 'carwash', // sfondo immagine wash.webp (loop)
-    floor: 'carwash', // asfalto scuro + bordo rosso neon
-    cube: LA_CUBE,
-    ship: LA_SHIP,
-    obstacleBottom: '#9a1414', // rosso neon scuro, coerente col bordo neon dell'asfalto
-    scrollSpeed: 630,
-    mapKey: 'testedo',
-    diffFrac: 0.85,
-  },
-  {
-    id: 'city',
-    name: 'City',
-    diff: 'Facile', // L1: il piu facile (verticalita dolce, razzo subito)
-    bg: 'city', // skyline procedurale
-    floor: 'city',
-    cube: LA_CUBE, // riusa i temi colore esistenti
-    ship: LA_SHIP,
-    obstacleBottom: '#8a1410', // bottom gradiente ostacoli coerente col floor rosso
-    scrollSpeed: 630,
-    mapKey: 'testedo', // PROVVISORIO: griglia segnaposto (colori City restano)
-    diffFrac: 0.30,
-  },
-  {
+    // L1 — Car Wash (giocabile). Usa la griglia builder-made 'testedo'.
     id: 'carwash',
     name: 'Car Wash',
-    diff: 'Medio', // L2: tower hopping, razzo presto
+    diff: 'Medio',
     bg: 'carwash', // sfondo immagine wash.webp (loop)
     floor: 'carwash', // asfalto scuro + bordo rosso neon
     cube: LA_CUBE,
     ship: LA_SHIP,
     obstacleBottom: '#9a1414', // rosso neon scuro, coerente col bordo neon dell'asfalto
     scrollSpeed: 630,
-    mapKey: 'testedo', // PROVVISORIO: griglia segnaposto (colori Car Wash restano)
+    mapKey: 'testedo', // griglia builder-made (l'unica buona oltre a metro)
+    music: 'carwash', // brano dedicato (public/carwash.mp3); default = 'game'
     diffFrac: 0.45,
   },
   {
-    id: 'losangeles',
-    name: 'Los Angeles',
-    diff: 'Medio', // L3: catene aeree + 1o tunnel + pad, ship a meta
-    bg: 'losangeles', // sfondo immagine LA.webp (loop)
-    floor: 'la', // passeggiata viola
-    cube: LA_CUBE,
-    ship: LA_SHIP,
-    obstacleBottom: '#8a3a12', // ambra/arancio scuro, coerente col tramonto LA
-    scrollSpeed: 630,
-    mapKey: 'testedo', // PROVVISORIO: griglia segnaposto (colori Los Angeles restano)
-    diffFrac: 0.60,
-  },
-  {
-    id: 'boulevard',
-    name: 'Boulevard',
-    diff: 'Difficile', // L4: catena orb + torri alte, ship tardi
-    bg: 'boulevard', // sfondo immagine boulevard.webp (loop)
-    floor: 'boulevard', // strada azzurra ad assi
-    cube: LA_CUBE,
-    ship: LA_SHIP,
-    obstacleBottom: '#143a6a', // blu scuro, coerente col floor azzurro
-    scrollSpeed: 630,
-    mapKey: 'testedo', // PROVVISORIO: griglia segnaposto (colori Boulevard restano)
-    diffFrac: 0.78,
-  },
-  {
+    // L2 — Metro (giocabile). Percorso dedicato (builder-made; NON nel checker).
     id: 'metro',
     name: 'Metro',
-    diff: 'Difficile', // L5: il piu difficile (tutto insieme, ship finale)
+    diff: 'Difficile',
     bg: 'metro', // sfondo immagine metro.webp (loop)
     floor: 'metro', // banchina viola chiaro
     cube: LA_CUBE,
     ship: LA_SHIP,
     obstacleBottom: '#241a52', // indaco/viola scuro, coerente con la banchina viola
     scrollSpeed: 630,
-    mapKey: 'testedo', // PROVVISORIO: griglia segnaposto (colori Metro restano)
+    mapKey: 'metro', // percorso dedicato (builder-made); NON incluso nel checker
+    music: 'metro', // brano dedicato (public/metro.mp3); default = 'game'
     diffFrac: 0.95,
+  },
+  {
+    // L3 — Los Angeles (coming soon).
+    id: 'losangeles',
+    name: 'Los Angeles',
+    diff: 'Medio',
+    bg: 'losangeles', // sfondo immagine LA.webp (loop)
+    floor: 'la', // passeggiata viola
+    cube: LA_CUBE,
+    ship: LA_SHIP,
+    obstacleBottom: '#8a3a12', // ambra/arancio scuro, coerente col tramonto LA
+    scrollSpeed: 630,
+    mapKey: 'testedo', // segnaposto finché non c'è il percorso vero
+    diffFrac: 0.60,
+    comingSoon: true,
+  },
+  {
+    // L4 — City (coming soon).
+    id: 'city',
+    name: 'City',
+    diff: 'Facile',
+    bg: 'city', // skyline procedurale
+    floor: 'city',
+    cube: LA_CUBE, // riusa i temi colore esistenti
+    ship: LA_SHIP,
+    obstacleBottom: '#8a1410', // bottom gradiente ostacoli coerente col floor rosso
+    scrollSpeed: 630,
+    mapKey: 'testedo', // segnaposto finché non c'è il percorso vero
+    diffFrac: 0.30,
+    comingSoon: true,
+  },
+  {
+    // L5 — Boulevard (coming soon).
+    id: 'boulevard',
+    name: 'Boulevard',
+    diff: 'Difficile',
+    bg: 'boulevard', // sfondo immagine boulevard.webp (loop)
+    floor: 'boulevard', // strada azzurra ad assi
+    cube: LA_CUBE,
+    ship: LA_SHIP,
+    obstacleBottom: '#143a6a', // blu scuro, coerente col floor azzurro
+    scrollSpeed: 630,
+    mapKey: 'testedo', // segnaposto finché non c'è il percorso vero
+    diffFrac: 0.78,
+    comingSoon: true,
   },
 ];
 
@@ -243,12 +241,21 @@ export const MAX_FALL_SPEED = 2400; // discesa più nitida con G alta (non cambi
 // --- Fisica del razzo (modalità ship) ---------------------------------------
 // Volo tipo jetpack: gravità ridotta, spinta su tenendo premuto, velocità
 // verticale clampata in entrambi i versi.
-export const SHIP_GRAVITY = GRAVITY * 0.42; // scala automaticamente con GRAVITY
-export const SHIP_THRUST = GRAVITY * 0.95; // scala automaticamente con GRAVITY
-export const SHIP_MAX_RISE = -832; // -640 × 1.30 (velocità)
-export const SHIP_MAX_FALL = 988; // 760 × 1.30 (velocità)
-export const SHIP_MAX_TILT = 0.5; // inclinazione max del muso (rad)
-export const SHIP_TILT_LERP = 0.18; // morbidezza dell'inclinazione (0..1)
+// Feel allineato al GD originale: gravità COSTANTE (come il razzo reale, niente
+// picchiata "progressiva"), ma DOLCE -> la caduta cresce gradualmente prima del
+// cap (rampa ~0.32s / ~1.67 tile), così resta stabile/controllabile e non si
+// tuffa subito. Salita INVARIATA: net su = SHIP_THRUST - SHIP_GRAVITY = 2580.
+// Cap simmetrici ±620 u/s (≈±10.3 tile/s): rampa più lunga compensa il cap un
+// filo più alto -> meno nervoso. (Vecchi valori: 0.47/0.9, ±560.)
+export const SHIP_GRAVITY = GRAVITY * 0.32; // = 1920 (gravità più dolce: caduta morbida)
+export const SHIP_THRUST = GRAVITY * 0.75; // = 4500 (net su = 4500-1920 = 2580, INVARIATO)
+export const SHIP_MAX_RISE = -620; // -10.3 tile/s su (cap simmetrico col fall)
+export const SHIP_MAX_FALL = 620; // 10.3 tile/s giù (cap simmetrico; rampa più lunga)
+// Inclinazione (pitch) del muso = velocità verticale × fattore, come il GD reale
+// (il muso punta dove il razzo sta andando: "inerzia visibile"). Tilt marcato +
+// smoothing reattivo -> impennata netta in salita senza lag, muso giù in caduta.
+export const SHIP_MAX_TILT = 0.6; // ~34.4° (era 0.5): impennata muso su/giù più marcata
+export const SHIP_TILT_LERP = 0.3; // più reattivo (era 0.2): ~63% in ~3 frame @60Hz, segue subito vy
 export const SHIP_COLOR = '#7cff4f'; // verde neon, coerente col cubo
 
 // --- Skin personalizzate (PNG in public/) -----------------------------------
@@ -376,9 +383,15 @@ export const PARALLAX_LAYERS = [
 export const BPM = 128; // battiti al minuto del beat segnaposto
 export const MUSIC_VOLUME = 0.5; // volume musica di default (0..1)
 export const SFX_VOLUME = 0.5; // volume effetti sonori di default (0..1)
-// Brani di sottofondo (loop), uno per contesto. Se un file manca → fallback al
-// beat sintetizzato. 'home' suona nei menu, 'game' durante un livello.
-export const MUSIC_TRACKS = { home: '/home.m4a', game: '/game.mp3' };
+// Brani di sottofondo (loop). Se un file manca → fallback al beat sintetizzato.
+// 'home' suona nei menu, 'game' è il brano di livello di default; alcuni livelli
+// hanno un brano dedicato (campo `music` su LEVELS → chiave di questo oggetto).
+export const MUSIC_TRACKS = {
+  home: '/home.mp3',
+  game: '/game.mp3',
+  carwash: '/carwash.mp3',
+  metro: '/metro.mp3',
+};
 // SFX da file (one-shot), instradati sul gain `sfx` come gli effetti sintetizzati
 // (quindi rispettano volume SFX + mute). Chiave logica → percorso in public/.
 // I "tag" dei player suonano alla selezione nella schermata Player.

@@ -3,13 +3,12 @@
 # optimize-assets.sh — ottimizza gli asset di public/ per il deploy.
 #
 # Genera versioni .webp (immagini) ridimensionate alla risoluzione realmente
-# usata a schermo e ricomprime la traccia musicale lunga in AAC (.m4a).
-# Gli asset originali .png/.mp3 restano in public/ come fallback.
+# usata a schermo. Gli asset originali .png restano in public/ come fallback.
+# I brani musicali (.mp3) sono gia' compatti (128kbps) e si spediscono cosi'.
 #
 # Dipendenze (gia' presenti su macOS / via Homebrew):
 #   - cwebp      (brew install webp)
 #   - sips       (nativo macOS, resize)
-#   - afconvert  (nativo macOS, encode AAC)
 #
 # Idempotente: rieseguire rigenera i file ottimizzati.
 # =============================================================================
@@ -59,10 +58,7 @@ resize_webp "$PUB/metro2.png" "$PUB/metro.webp" 6400 80  # 9504x1069 -> alt ~720
 resize_webp "$PUB/wash.png" "$PUB/wash.webp" 5180 80     # 6336x1174 -> alt ~960
 resize_webp "$PUB/boulevard.png" "$PUB/boulevard.webp" 2275 80 # 3168x1338 -> alt ~960
 
-echo "==> Audio -> AAC (.m4a)"
-# Traccia menu (173s, 320kbps, 6.7MB) -> 96kbps AAC (~2MB)
-afconvert -f m4af -d aac -b 96000 "$PUB/home.mp3" "$PUB/home.m4a" >/dev/null
-# game.mp3 (27s, 128kbps, 430KB) e' gia' compatto: lasciato com'e'.
+echo "==> Audio: i brani (home/game/carwash/metro .mp3) sono gia' compatti (128kbps), nessuna conversione."
 
 echo "==> Icone PWA (Aggiungi a Home)"
 # Icone dell'app generate dal cubo Artie (gia' quadrato 256x256 su sfondo nero):
@@ -84,5 +80,3 @@ for base in artie-cube miles-cubo dodge-artie coin palm logo options stats bg-ho
     printf "  %-18s %8s -> %8s\n" "$base" "$o" "$n"
   fi
 done
-o=$(stat -f%z "$PUB/home.mp3"); n=$(stat -f%z "$PUB/home.m4a")
-printf "  %-18s %8s -> %8s\n" "home(mp3->m4a)" "$o" "$n"

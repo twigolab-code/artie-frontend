@@ -10,13 +10,18 @@
 // Le sorgenti di "salto" sono: barra spaziatrice / freccia su, click sinistro,
 // touch. Tutte mappano sulla stessa azione.
 // =============================================================================
-// True se l'elemento è un campo editabile (input/textarea/select o contentEditable):
-// sui tap su questi elementi non vanno né preventDefault né salto, così la tastiera
-// mobile si apre e la digitazione funziona.
-function isEditableTarget(el) {
+// True se il tocco va lasciato al browser/DOM (niente preventDefault, niente salto):
+//  - campi editabili (input/textarea/select/contentEditable): così su mobile si apre
+//    la tastiera e la digitazione funziona;
+//  - elementi interattivi del DOM sopra il canvas (link <a>, <button>): così il
+//    click/navigazione nativo funziona su mobile (link crediti del footer, link "Info").
+//    Senza questa esenzione il preventDefault globale annullerebbe il tap e i link
+//    risulterebbero "morti" su mobile.
+function isInteractiveTarget(el) {
   if (!el || !el.tagName) return false;
   const tag = el.tagName.toUpperCase();
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable) return true;
+  return typeof el.closest === 'function' && el.closest('a, button') !== null;
 }
 
 export class Input {
@@ -47,10 +52,11 @@ export class Input {
     target.addEventListener(
       'touchstart',
       (e) => {
-        // Tap su un campo editabile (es. <input> nickname): NON fare preventDefault,
-        // altrimenti su mobile si annulla il focus e non si apre la tastiera. Né va
-        // contato come salto.
-        if (isEditableTarget(e.target)) return;
+        // Tap su un campo editabile (es. <input> nickname) o su un elemento
+        // interattivo del DOM (link <a>/<button> sopra il canvas: crediti, "Info"):
+        // NON fare preventDefault, altrimenti si annulla focus/click/navigazione
+        // nativi su mobile. Né va contato come salto.
+        if (isInteractiveTarget(e.target)) return;
         e.preventDefault();
         this._press();
       },
