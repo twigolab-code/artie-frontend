@@ -530,11 +530,14 @@ L1 (Car Wash). Coming-soon levels are still navigable (browsable) but not launch
 Directional gameplay analytics, **anonymous by design** — no personal data leaves the device: NO
 nickname, NO persistent device id, only an ephemeral per-session pseudonym (`sessionId`). The backend
 is meant to keep aggregate stats. The backend is two AWS Lambda Function URLs (eu-central-1):
-a `/session` handshake and an `/ingest` endpoint, **reached via Cloudflare-proxied subdomains**
-(`session.og-dash.it` / `ingest.og-dash.it`) — NOT the direct `*.lambda-url.…on.aws` URLs, which are
-**origin-locked and return 403**. The site is served from the apex `og-dash.it` (Cloudflare Pages).
-(If the domain ever changes, swap it in `.env*` + `_headers` together — the CSP `connect-src` origins
-must match `VITE_ARTIE_*_URL` exactly.)
+a `/session` handshake and an `/ingest` endpoint, **reached via a single Cloudflare-proxied host**
+`api.og-dash.it` (`https://api.og-dash.it/session` / `https://api.og-dash.it/ingest`) — NOT the direct
+`*.lambda-url.…on.aws` URLs, which are **origin-locked and return 403**. The site is served from the
+apex `og-dash.it` (Cloudflare Pages). Note the env vars are the **full URLs incl. path** (the code
+fetches `VITE_ARTIE_SESSION_URL`/`_INGEST_URL` verbatim, it does NOT append `/session`/`/ingest`),
+but the CSP `connect-src` takes the **origin only** (`https://api.og-dash.it`, no path). (If the domain
+ever changes, swap it in `.env*` + `_headers` together — the `connect-src` origin must match the env
+URLs' origin exactly.)
 
 - **Identity (anonymous):** the ONLY identifier is `sessionId` = fresh UUID per page load (= per play
   session), **ephemeral, never written to localStorage**, so it can't track a device over time or be
@@ -552,16 +555,17 @@ must match `VITE_ARTIE_*_URL` exactly.)
   (see §4 for which game seam emits which; `death` carries `progressPct` 0–100 + `elapsedMs`).
 - **Unload:** `visibilitychange`→hidden + `pagehide` push `session_end` and flush via
   `navigator.sendBeacon` (can't set headers → token goes in the body as `_t`). Best-effort, no retry.
-- **Config:** `VITE_ARTIE_SESSION_URL` / `VITE_ARTIE_INGEST_URL` (the proxied subdomains, **no
-  trailing slash**) + `VITE_ARTIE_TURNSTILE_SITE_KEY` (**predisposed but inactive** — present in
+- **Config:** `VITE_ARTIE_SESSION_URL` / `VITE_ARTIE_INGEST_URL` (the **full endpoint URLs incl.
+  path**, e.g. `https://api.og-dash.it/session` — used verbatim, **no trailing slash**) +
+  `VITE_ARTIE_TURNSTILE_SITE_KEY` (**predisposed but inactive** — present in
   `.env.example` commented out; no widget/script is wired until the backend activates Turnstile and
   provides the site key). All are Vite env, inlined at build time. Without **both** URLs telemetry is
-  a complete no-op (no network, no logs). Local dev uses `.env.local` (gitignored via `*.local`);
-  `.env.example` documents the vars; Cloudflare Pages sets them in the build env (build-time → saving
-  in the dashboard requires a rebuild to take effect). **CSP:** `public/_headers` `connect-src` must
-  list both telemetry origins or the browser blocks the requests (CSP is a static edge header and
-  can't read the Vite env — the origins are hard-coded there and must be kept in sync **exactly** with
-  the env URLs: same scheme/host, no path/trailing slash).
+  a complete no-op (no network, no logs). Local dev reads `.env` (committed, non-secret) or
+  `.env.local` (gitignored via `*.local`); `.env.example` documents the vars; Cloudflare Pages sets
+  them in the build env (build-time → saving in the dashboard requires a **Retry deployment** to take
+  effect). **CSP:** `public/_headers` `connect-src` must list the telemetry **origin** or the browser
+  blocks the requests (CSP is a static edge header and can't read the Vite env — the origin is
+  hard-coded there and must match the env URLs' origin **exactly**: same scheme/host, **no path**).
 - **Fail-silent guarantee:** every public method is a try/catch no-op; `flush()` runs as a detached
   promise and is never awaited; network only happens on the 30 s timer or unload, never in
   `update()`/`render()`.

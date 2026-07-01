@@ -21,18 +21,19 @@
 # public/) -> default-src 'self'. 'unsafe-inline' su style-src serve per il
 # <style> inline in index.html (@font-face + CSS del canvas). data:/blob: per
 # eventuali canvas/audio buffer. UNICA eccezione esterna: il backend telemetria
-# (endpoint /session e /ingest, sottodomini proxati da Cloudflare — NON i lambda-url
-# diretti, che sono origin-locked -> 403) in connect-src, necessario per fetch +
-# navigator.sendBeacon. Se cambiano gli URL del backend, aggiornare qui connect-src
-# (gli origin devono combaciare ESATTAMENTE con VITE_ARTIE_SESSION_URL /
-# VITE_ARTIE_INGEST_URL: stesso schema/host, niente path/trailing slash) o le
-# richieste verranno bloccate silenziosamente dalla CSP.
+# (host unico api.og-dash.it proxato da Cloudflare, endpoint /session e /ingest — NON
+# i lambda-url diretti, che sono origin-locked -> 403) in connect-src, necessario per
+# fetch + navigator.sendBeacon. NB: connect-src prende solo l'ORIGIN (schema+host,
+# niente path), mentre VITE_ARTIE_SESSION_URL/INGEST_URL sono le URL complete col path.
+# Se cambia l'host del backend, aggiornare qui connect-src (l'origin deve combaciare
+# ESATTAMENTE con quello delle VITE_ARTIE_*_URL) o le richieste verranno bloccate
+# silenziosamente dalla CSP.
 /*
   Cache-Control: no-cache
   X-Content-Type-Options: nosniff
   X-Frame-Options: SAMEORIGIN
   Referrer-Policy: strict-origin-when-cross-origin
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://session.og-dash.it https://ingest.og-dash.it; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://api.og-dash.it; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; upgrade-insecure-requests
   Permissions-Policy: accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
